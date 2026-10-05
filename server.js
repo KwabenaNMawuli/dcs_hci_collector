@@ -16,7 +16,7 @@ const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
 
 const PORT = process.env.PORT || 3000;
-const DOCX_PATH = process.env.DOCX_PATH;
+const DOCX_PATH = process.env.DOCX_PATH || path.join(__dirname, 'data', 'questionnaire.docx');
 const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
 
 // OAuth 2.0 Credentials

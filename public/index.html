@@ -82,6 +82,28 @@
         <button class="modal-close" id="modal-close-btn" aria-label="Close">✕</button>
       </div>
 
+      <!-- Track Switcher (Question vs Options) -->
+      <div id="track-switcher" class="track-switcher">
+        <button type="button" class="track-tab active" id="tab-track-q">
+          🎙️ Question Prompt <span id="badge-q-status" class="track-badge"></span>
+        </button>
+        <button type="button" class="track-tab" id="tab-track-opts">
+          📋 Options (Read all) <span id="badge-opts-status" class="track-badge"></span>
+        </button>
+      </div>
+
+      <!-- Content display for the active track -->
+      <div id="modal-content-panel" class="modal-content-panel">
+        <div id="modal-q-view" class="track-view">
+          <p class="track-instruction">Read the question prompt aloud:</p>
+          <div id="modal-prompt-text" class="prompt-display"></div>
+        </div>
+        <div id="modal-opts-view" class="track-view" style="display:none;">
+          <p class="track-instruction">Read through all the options aloud in sequence:</p>
+          <ol id="modal-options-list" class="options-display"></ol>
+        </div>
+      </div>
+
       <!-- waveform visualiser -->
       <canvas id="waveform" class="waveform" width="600" height="80" aria-hidden="true"></canvas>
 

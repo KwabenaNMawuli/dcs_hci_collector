@@ -1,21 +1,14 @@
 /**
  * app.js  —  DCS HCI Audio Collector frontend
- *
- * Features:
- *  - Fetches question list + Drive status from /api/questions
- *  - Renders a searchable, filterable grid of question cards
- *  - Opens a recording modal per question
- *  - Records audio via MediaRecorder API with live waveform visualisation
- *  - Uploads the recorded blob to the server → Google Drive
- *  - Allows re-recording (replaces existing file)
- *  - Card badges update after upload
+ * Supports separate audio tracks for Question Prompt and Question Options.
  */
 
 'use strict';
 
 // ── State ──────────────────────────────────────────────────────────────────
-let allQuestions   = [];      // full list from the API
-let currentQ       = null;    // question being recorded
+let allQuestions   = [];
+let currentQ       = null;
+let currentTrack   = 'question'; // 'question' | 'options'
 
 // MediaRecorder state
 let mediaRecorder  = null;
@@ -38,6 +31,19 @@ const modal        = document.getElementById('record-modal');
 const modalQid     = document.getElementById('modal-qid');
 const modalTitle   = document.getElementById('modal-title');
 const modalClose   = document.getElementById('modal-close-btn');
+
+// Track tabs
+const trackSwitcher    = document.getElementById('track-switcher');
+const tabTrackQ        = document.getElementById('tab-track-q');
+const tabTrackOpts     = document.getElementById('tab-track-opts');
+const modalQView       = document.getElementById('modal-q-view');
+const modalOptsView    = document.getElementById('modal-opts-view');
+const modalPromptText  = document.getElementById('modal-prompt-text');
+const modalOptionsList = document.getElementById('modal-options-list');
+const badgeQStatus     = document.getElementById('badge-q-status');
+const badgeOptsStatus  = document.getElementById('badge-opts-status');
+
+// Controls
 const btnRecord    = document.getElementById('btn-record');
 const btnStop      = document.getElementById('btn-stop');
 const btnPlay      = document.getElementById('btn-play');
@@ -58,6 +64,7 @@ const badgeDriveConnected = document.getElementById('badge-drive-connected');
   await checkAuthStatus();
   await loadQuestions();
   bindToolbar();
+  bindTrackTabs();
 })();
 
 async function checkAuthStatus() {
@@ -117,43 +124,76 @@ function renderGrid(questions) {
 
 function buildCard(q) {
   const card = document.createElement('div');
+  const hasOpts = Array.isArray(q.options) && q.options.length > 0;
+  
   card.className = `q-card ${q.hasAudio ? 'recorded' : 'missing'}`;
   card.dataset.id = q.id;
+
+  let badgeLabel = 'No audio';
+  if (q.hasAudio) {
+    badgeLabel = '✔ Fully Recorded';
+  } else if (hasOpts && (q.hasQuestionAudio || q.hasOptionsAudio)) {
+    badgeLabel = '⏳ Partial';
+  }
 
   card.innerHTML = `
     <div class="card-top">
       <span class="q-id">${q.id}</span>
-      <span class="q-badge ${q.hasAudio ? 'recorded' : 'missing'}">
-        ${q.hasAudio ? '✔ Recorded' : 'No audio'}
+      <span class="q-badge ${q.hasAudio ? 'recorded' : (badgeLabel.includes('Partial') ? 'recorded' : 'missing')}">
+        ${badgeLabel}
       </span>
     </div>
     <p class="q-text">${q.text || '<em>No text available</em>'}</p>
-    <div class="card-actions">
-      <button class="btn-card btn-card-record" data-id="${q.id}">
-        🎙 ${q.hasAudio ? 'Re-record' : 'Record'}
-      </button>
-      ${q.hasAudio && q.driveLink
-        ? `<button class="btn-card btn-card-play" data-link="${q.driveLink}" title="Open in Drive">▶ Play</button>`
-        : `<button class="btn-card btn-card-play" disabled title="No audio yet">▶ Play</button>`
-      }
+    ${hasOpts ? `<div class="card-options-summary">📋 ${q.options.length} options available</div>` : ''}
+
+    <div class="card-tracks">
+      <div class="card-track-row">
+        <span class="track-title">🎙️ Question</span>
+        <div class="track-actions">
+          <button class="btn-mini btn-mini-record" data-id="${q.id}" data-track="question">
+            ${q.hasQuestionAudio ? 'Re-record' : 'Record'}
+          </button>
+          <button class="btn-mini btn-mini-play" ${q.hasQuestionAudio ? `data-link="${q.questionDriveLink}"` : 'disabled'}>
+            ▶ Play
+          </button>
+        </div>
+      </div>
+
+      ${hasOpts ? `
+      <div class="card-track-row">
+        <span class="track-title">📋 Options</span>
+        <div class="track-actions">
+          <button class="btn-mini btn-mini-record" data-id="${q.id}" data-track="options">
+            ${q.hasOptionsAudio ? 'Re-record' : 'Record'}
+          </button>
+          <button class="btn-mini btn-mini-play" ${q.hasOptionsAudio ? `data-link="${q.optionsDriveLink}"` : 'disabled'}>
+            ▶ Play
+          </button>
+        </div>
+      </div>
+      ` : ''}
     </div>
   `;
 
-  // Record button → open modal
-  card.querySelector('.btn-card-record').addEventListener('click', (e) => {
-    e.stopPropagation();
-    const q = allQuestions.find(x => x.id === card.dataset.id);
-    openModal(q);
+  // Attach record triggers
+  card.querySelectorAll('.btn-mini-record').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const track = btn.dataset.track;
+      const question = allQuestions.find(x => x.id === card.dataset.id);
+      openModal(question, track);
+    });
   });
 
-  // Play button → open Drive link
-  const playBtn = card.querySelector('.btn-card-play');
-  if (!playBtn.disabled) {
-    playBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.open(playBtn.dataset.link, '_blank');
-    });
-  }
+  // Attach play triggers
+  card.querySelectorAll('.btn-mini-play').forEach(btn => {
+    if (!btn.disabled && btn.dataset.link) {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.open(btn.dataset.link, '_blank');
+      });
+    }
+  });
 
   return card;
 }
@@ -181,16 +221,80 @@ function applyFilters() {
   renderGrid(filtered);
 }
 
-// ── Modal open / close ─────────────────────────────────────────────────────
-function openModal(q) {
-  currentQ = q;
+// ── Track Tabs Bindings ────────────────────────────────────────────────────
+function bindTrackTabs() {
+  tabTrackQ.addEventListener('click', () => switchTrack('question'));
+  tabTrackOpts.addEventListener('click', () => switchTrack('options'));
+}
 
-  modalQid.textContent   = q.id;
-  modalTitle.textContent = q.text || 'No question text';
+function switchTrack(track) {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    if (!confirm('Switching tracks will discard the current recording. Continue?')) {
+      return;
+    }
+    stopRecording(false);
+  }
 
-  // Reset recording state
+  currentTrack = track;
   resetRecordingUI();
-  replaceWarn.hidden = !q.hasAudio;
+
+  if (track === 'question') {
+    tabTrackQ.classList.add('active');
+    tabTrackOpts.classList.remove('active');
+    modalQView.style.display = 'block';
+    modalOptsView.style.display = 'none';
+  } else {
+    tabTrackOpts.classList.add('active');
+    tabTrackQ.classList.remove('active');
+    modalOptsView.style.display = 'block';
+    modalQView.style.display = 'none';
+  }
+
+  updateTrackBadges();
+}
+
+function updateTrackBadges() {
+  if (!currentQ) return;
+  const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length > 0;
+
+  badgeQStatus.textContent = currentQ.hasQuestionAudio ? '✔' : 'Empty';
+  badgeQStatus.className = `track-badge ${currentQ.hasQuestionAudio ? 'done' : 'empty'}`;
+
+  if (hasOpts) {
+    badgeOptsStatus.textContent = currentQ.hasOptionsAudio ? '✔' : 'Empty';
+    badgeOptsStatus.className = `track-badge ${currentQ.hasOptionsAudio ? 'done' : 'empty'}`;
+  }
+
+  // Update replace warning for current track
+  const isReplacing = currentTrack === 'question' ? currentQ.hasQuestionAudio : currentQ.hasOptionsAudio;
+  replaceWarn.hidden = !isReplacing;
+}
+
+// ── Modal open / close ─────────────────────────────────────────────────────
+function openModal(q, preferredTrack = 'question') {
+  currentQ = q;
+  modalQid.textContent = q.id;
+  modalTitle.textContent = q.text || 'No question text';
+  modalPromptText.textContent = q.text || 'No prompt available';
+
+  const hasOpts = Array.isArray(q.options) && q.options.length > 0;
+
+  // Populate options list
+  modalOptionsList.innerHTML = '';
+  if (hasOpts) {
+    trackSwitcher.style.display = 'flex';
+    tabTrackOpts.style.display = 'flex';
+    q.options.forEach((opt) => {
+      const li = document.createElement('li');
+      li.textContent = opt;
+      modalOptionsList.appendChild(li);
+    });
+  } else {
+    trackSwitcher.style.display = 'none';
+  }
+
+  // Set track and switch view
+  switchTrack(hasOpts && preferredTrack === 'options' ? 'options' : 'question');
 
   modal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -222,7 +326,6 @@ async function startRecording() {
     return;
   }
 
-  // Web Audio analyser for waveform
   audioCtx  = new AudioContext();
   analyser  = audioCtx.createAnalyser();
   analyser.fftSize = 1024;
@@ -230,7 +333,6 @@ async function startRecording() {
   source.connect(analyser);
   drawWaveform();
 
-  // MediaRecorder
   audioChunks  = [];
   recordedBlob = null;
   const mimeType = getSupportedMimeType();
@@ -249,9 +351,8 @@ async function startRecording() {
     uploadStatus.className   = 'upload-status';
   });
 
-  mediaRecorder.start(250); // collect every 250ms
+  mediaRecorder.start(250);
 
-  // Timer
   elapsedSeconds = 0;
   timerEl.textContent = '00:00';
   timerInterval = setInterval(() => {
@@ -261,7 +362,6 @@ async function startRecording() {
     timerEl.textContent = `${m}:${s}`;
   }, 1000);
 
-  // UI state
   btnRecord.disabled   = true;
   btnRecord.classList.add('recording');
   btnStop.disabled     = false;
@@ -322,9 +422,12 @@ async function uploadAudio() {
 
   const formData = new FormData();
   const ext      = blobExtension(recordedBlob.type);
-  formData.append('audio', recordedBlob, `${currentQ.id}${ext}`);
+  const suffix   = currentTrack === 'options' ? '_options' : '_question';
+
+  formData.append('audio', recordedBlob, `${currentQ.id}${suffix}${ext}`);
   formData.append('questionId', currentQ.id);
-  formData.append('replace', currentQ.hasAudio ? 'true' : 'false');
+  formData.append('targetType', currentTrack);
+  formData.append('replace', 'true');
 
   try {
     const res  = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -335,10 +438,18 @@ async function uploadAudio() {
     uploadStatus.textContent = `✅ Uploaded as ${data.filename}`;
     uploadStatus.className   = 'upload-status success';
 
-    // Update local state + refresh card
-    currentQ.hasAudio   = true;
-    currentQ.driveLink  = data.webViewLink;
-    replaceWarn.hidden  = false;
+    if (currentTrack === 'question') {
+      currentQ.hasQuestionAudio = true;
+      currentQ.questionDriveLink = data.webViewLink;
+    } else {
+      currentQ.hasOptionsAudio = true;
+      currentQ.optionsDriveLink = data.webViewLink;
+    }
+
+    const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length > 0;
+    currentQ.hasAudio = hasOpts ? (currentQ.hasQuestionAudio && currentQ.hasOptionsAudio) : currentQ.hasQuestionAudio;
+
+    updateTrackBadges();
     updateCardInGrid(currentQ);
     updateStats();
 
@@ -392,7 +503,6 @@ function clearWaveform() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
 function resetRecordingUI() {
   recordedBlob = null;
   audioChunks  = [];
@@ -434,4 +544,3 @@ function updateCardInGrid(q) {
   const newCard = buildCard(q);
   card.replaceWith(newCard);
 }
-

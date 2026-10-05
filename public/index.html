@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-title">
+        <span class="mic-icon">🎙️</span>
+        <div>
+          <h1>Audio Collector</h1>
+          <p class="header-subtitle">DCS HCI Questionnaire Recording Tool</p>
+        </div>
+      </div>
+      <div id="status-bar" class="status-bar">
+        <div class="status-chip" id="chip-recorded">
+          <span class="chip-dot dot-green"></span>
+          <span id="stat-recorded">—</span> recorded
+        </div>
+        <div class="status-chip" id="chip-missing">
+          <span class="chip-dot dot-orange"></span>
+          <span id="stat-missing">—</span> missing
+        </div>
+        <div class="status-chip">
+          <span class="chip-dot dot-grey"></span>
+          <span id="stat-total">—</span> total
+        </div>
+        <div id="drive-auth-container">
+          <a id="btn-auth-drive" href="/auth/google" class="auth-btn" style="display:none;">
+            🔑 Connect Google Drive
+          </a>
+          <span id="badge-drive-connected" class="auth-badge" style="display:none;">
+            ☁️ Drive Connected
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Toolbar ─────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <input
+        type="search"
+        id="search-input"
+        placeholder="Search by question ID or text…"
+        aria-label="Search questions"
+      />
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Show:</label>
+      <select id="filter-select" aria-label="Filter questions">
+        <option value="all">All questions</option>
+        <option value="missing">Missing audio</option>
+        <option value="recorded">Already recorded</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ── Main grid ──────────────────────────────────────────────── -->
+  <main id="question-grid" class="question-grid">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <p>Loading questions…</p>
+    </div>
+  </main>
+
+  <!-- ── Recording modal ────────────────────────────────────────── -->
+  <div id="record-modal" class="modal-overlay" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <div>
+          <span class="modal-qid" id="modal-qid"></span>
+          <h2 id="modal-title" class="modal-qtitle"></h2>
+        </div>
+        <button class="modal-close" id="modal-close-btn" aria-label="Close">✕</button>
+      </div>
+
+      <!-- waveform visualiser -->
+      <canvas id="waveform" class="waveform" width="600" height="80" aria-hidden="true"></canvas>
+
+      <!-- Timer -->
+      <div class="record-timer" id="record-timer">00:00</div>
+
+      <!-- Controls -->
+      <div class="record-controls">
+        <button id="btn-record" class="btn btn-record" title="Start recording">
+          <span class="btn-icon">●</span> Record
+        </button>
+        <button id="btn-stop" class="btn btn-stop" title="Stop recording" disabled>
+          <span class="btn-icon">■</span> Stop
+        </button>
+        <button id="btn-play" class="btn btn-play" title="Play back recording" disabled>
+          <span class="btn-icon">▶</span> Play
+        </button>
+      </div>
+
+      <!-- Playback element (hidden) -->
+      <audio id="playback-audio" style="display:none"></audio>
+
+      <!-- Replace warning -->
+      <div id="replace-warning" class="replace-warning" hidden>
+        ⚠️ This question already has an audio file. Uploading will <strong>replace</strong> it.
+      </div>
+
+      <!-- Upload -->
+      <div class="upload-row">
+        <button id="btn-upload" class="btn btn-upload" disabled>
+          ☁️ Upload to Drive
+        </button>
+        <div id="upload-status" class="upload-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+

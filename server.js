@@ -1,6 +1,7 @@
 /**
  * server.js
  * DCS HCI Audio Collector — Express backend with Google OAuth 2.0
+ * Supports separate audio for Question Prompts and Question Options.
  */
 
 'use strict';
@@ -27,7 +28,6 @@ const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `http://localhost
 const TOKEN_PATH = path.join(__dirname, 'tokens.json');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
-// Ensure local backup folder exists
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -41,7 +41,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---------------------------------------------------------------------------
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: 30 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('audio/')) {
       cb(null, true);
@@ -89,7 +89,6 @@ function getDriveClient() {
     throw new Error('Google account not connected. Please click "Connect Google Drive".');
   }
 
-  // Handle auto-refresh token event
   oauth2Client.on('tokens', (tokens) => {
     try {
       const current = fs.existsSync(TOKEN_PATH) ? JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8')) : {};
@@ -196,6 +195,20 @@ app.get('/api/auth-status', (req, res) => {
   });
 });
 
+// Helper to look up file by variations of extensions
+function findDriveFile(filesMap, prefixes) {
+  const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
+  for (const prefix of prefixes) {
+    for (const ext of EXTS) {
+      const key = `${prefix}${ext}`;
+      if (filesMap.has(key)) {
+        return filesMap.get(key);
+      }
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // API Routes
 // ---------------------------------------------------------------------------
@@ -210,21 +223,22 @@ app.get('/api/questions', async (req, res) => {
       // Drive might not be connected yet
     }
 
-    const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
     const enriched = questions.map((q) => {
-      let uploaded = null;
-      for (const ext of EXTS) {
-        const key = `${q.id}${ext}`;
-        if (filesMap.has(key)) {
-          uploaded = filesMap.get(key);
-          break;
-        }
-      }
+      // Question audio can be `<id>_question` or `<id>`
+      const qFile = findDriveFile(filesMap, [`${q.id}_question`, q.id]);
+      // Options audio is `<id>_options` or `<id>_opts`
+      const optsFile = findDriveFile(filesMap, [`${q.id}_options`, `${q.id}_opts`]);
+
+      const hasOptions = Array.isArray(q.options) && q.options.length > 0;
 
       return {
         ...q,
-        hasAudio: !!uploaded,
-        driveLink: uploaded ? uploaded.webViewLink : null,
+        hasQuestionAudio: !!qFile,
+        questionDriveLink: qFile ? qFile.webViewLink : null,
+        hasOptionsAudio: !!optsFile,
+        optionsDriveLink: optsFile ? optsFile.webViewLink : null,
+        // Overall status: if has options, both needed; if no options, question needed
+        hasAudio: hasOptions ? (!!qFile && !!optsFile) : !!qFile,
       };
     });
 
@@ -237,7 +251,8 @@ app.get('/api/questions', async (req, res) => {
 
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
-    const { questionId, replace } = req.body;
+    const { questionId, targetType, replace } = req.body;
+    // targetType: 'question' | 'options'
 
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
@@ -245,6 +260,8 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'No audio file provided' });
     }
+
+    const typeSuffix = targetType === 'options' ? '_options' : '_question';
 
     const mimeToExt = {
       'audio/webm': '.webm',
@@ -255,13 +272,13 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       'audio/x-m4a': '.m4a',
     };
     const ext = mimeToExt[req.file.mimetype] || '.webm';
-    const filename = `${questionId}${ext}`;
+    const filename = `${questionId}${typeSuffix}${ext}`;
 
-    // 1. Always save a local copy in uploads/ as backup
+    // 1. Save local backup
     const localPath = path.join(UPLOADS_DIR, filename);
     fs.writeFileSync(localPath, req.file.buffer);
 
-    // 2. Upload to Google Drive via OAuth 2.0
+    // 2. Upload to Google Drive
     const drive = getDriveClient();
     const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
 
@@ -269,17 +286,17 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
     }
 
-    // If replace=true, delete old file
+    // If replace=true, delete old file matching this target
     if (replace === 'true') {
       try {
         const existingMap = await listDriveFiles();
-        const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
-        for (const oldExt of EXTS) {
-          const oldKey = `${questionId}${oldExt}`;
-          if (existingMap.has(oldKey)) {
-            await drive.files.delete({ fileId: existingMap.get(oldKey).fileId });
-            break;
-          }
+        const prefixes = targetType === 'options' 
+          ? [`${questionId}_options`, `${questionId}_opts`]
+          : [`${questionId}_question`, questionId];
+        
+        const existing = findDriveFile(existingMap, prefixes);
+        if (existing) {
+          await drive.files.delete({ fileId: existing.fileId });
         }
       } catch (delErr) {
         console.warn('Could not delete old file:', delErr.message);
@@ -307,6 +324,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       success: true,
       fileId: driveRes.data.id,
       filename: driveRes.data.name,
+      targetType: targetType || 'question',
       webViewLink: driveRes.data.webViewLink,
     });
   } catch (err) {
@@ -323,18 +341,18 @@ app.get('/api/status', async (req, res) => {
       filesMap = await listDriveFiles();
     } catch (_) {}
 
-    const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
-    let recorded = 0;
+    let fullyRecorded = 0;
     for (const q of questions) {
-      for (const ext of EXTS) {
-        if (filesMap.has(`${q.id}${ext}`)) {
-          recorded++;
-          break;
-        }
+      const qFile = findDriveFile(filesMap, [`${q.id}_question`, q.id]);
+      const optsFile = findDriveFile(filesMap, [`${q.id}_options`, `${q.id}_opts`]);
+      const hasOptions = Array.isArray(q.options) && q.options.length > 0;
+
+      if (hasOptions ? (qFile && optsFile) : qFile) {
+        fullyRecorded++;
       }
     }
 
-    res.json({ total: questions.length, recorded, missing: questions.length - recorded });
+    res.json({ total: questions.length, recorded: fullyRecorded, missing: questions.length - fullyRecorded });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

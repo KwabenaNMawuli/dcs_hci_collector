@@ -1,6 +1,6 @@
 /**
  * questions-parser.js
- * Parses a .docx questionnaire and extracts question IDs + text.
+ * Parses a .docx questionnaire and extracts question IDs, prompt text, and options.
  * Question lines are identified by a leading code like C1, P6, R1a, M12, etc.
  */
 
@@ -11,7 +11,7 @@ const QUESTION_ID_RE = /^([A-Z][A-Z0-9]?[0-9]+[a-z]?)\s+(Required|Optional)(.*)/
 /**
  * Parse questions from a .docx file.
  * @param {string} docxPath - Absolute path to the .docx file.
- * @returns {Promise<Array<{id: string, required: boolean, text: string}>>}
+ * @returns {Promise<Array<{id: string, required: boolean, text: string, options: string[]}>>}
  */
 async function parseQuestions(docxPath) {
   const result = await mammoth.extractRawText({ path: docxPath });
@@ -29,27 +29,32 @@ async function parseQuestions(docxPath) {
     const id = match[1];
     const required = match[2] === 'Required';
 
-    // Find the next non-meta line as the question text
     let text = '';
-    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
-      const next = lines[j];
+    const options = [];
+
+    // Collect subsequent lines until the next question header
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (QUESTION_ID_RE.test(line)) break;
+
       if (
-        next.startsWith('Interviewer instruction') ||
-        next.startsWith('Enumerator') ||
-        next.startsWith('☐') ||
-        QUESTION_ID_RE.test(next)
+        !text &&
+        !line.startsWith('Interviewer instruction') &&
+        !line.startsWith('Enumerator') &&
+        !line.startsWith('☐')
       ) {
-        break;
+        text = line;
       }
-      text = next;
-      break;
+
+      if (line.startsWith('☐')) {
+        options.push(line.replace(/^☐\s*/, ''));
+      }
     }
 
-    questions.push({ id, required, text });
+    questions.push({ id, required, text, options });
   }
 
   return questions;
 }
 
 module.exports = { parseQuestions };
-

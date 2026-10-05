@@ -1,0 +1,30 @@
+{
+  "name": "dcs_hci_collector",
+  "version": "1.0.0",
+  "description": "A simple tool for collecting audio data for questionnaires etc.",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "node --watch --watch-preserve-output server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KwabenaNMawuli/dcs_hci_collector.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/KwabenaNMawuli/dcs_hci_collector/issues"
+  },
+  "homepage": "https://github.com/KwabenaNMawuli/dcs_hci_collector#readme",
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "googleapis": "^183.0.0",
+    "mammoth": "^1.13.0",
+    "multer": "^2.4.0"
+  }
+}

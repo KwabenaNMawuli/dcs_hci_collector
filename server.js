@@ -1,7 +1,7 @@
 /**
  * server.js
  * DCS HCI Audio Collector — Express backend with Google OAuth 2.0
- * Supports separate audio for Question Prompts and Question Options.
+ * Supports Akan and Ewe languages, with separate audio tracks for Question Prompts and Question Options.
  */
 
 'use strict';
@@ -17,7 +17,19 @@ const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
 
 const PORT = process.env.PORT || 3000;
-const DOCX_PATH = process.env.DOCX_PATH || path.join(__dirname, 'data', 'questionnaire.docx');
+
+// Docx questionnaire paths for Akan and Ewe
+const DOCX_PATH_AKAN =
+  process.env.DOCX_PATH_AKAN ||
+  process.env.DOCX_PATH ||
+  path.join(__dirname, 'data', 'questionnaire.docx');
+
+const DOCX_PATH_EWE =
+  process.env.DOCX_PATH_EWE ||
+  (fs.existsSync(path.join(__dirname, 'data', 'questionnaire-ewe.docx'))
+    ? path.join(__dirname, 'data', 'questionnaire-ewe.docx')
+    : path.join(__dirname, 'GH-MoMo-questionnaire-Ewe-draft (1).docx'));
+
 const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
 
 // OAuth 2.0 Credentials
@@ -103,17 +115,23 @@ function getDriveClient() {
 }
 
 // ---------------------------------------------------------------------------
-// Questions Cache
+// Questions Cache per language
 // ---------------------------------------------------------------------------
-let questionsCache = null;
+const questionsCache = {
+  akan: null,
+  ewe: null,
+};
 
-async function getQuestions() {
-  if (questionsCache) return questionsCache;
-  if (!DOCX_PATH) {
-    throw new Error('DOCX_PATH is not set in .env');
+async function getQuestions(lang = 'akan') {
+  const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+  if (questionsCache[normLang]) return questionsCache[normLang];
+
+  const docPath = normLang === 'ewe' ? DOCX_PATH_EWE : DOCX_PATH_AKAN;
+  if (!docPath || !fs.existsSync(docPath)) {
+    throw new Error(`Questionnaire file not found for ${normLang}: ${docPath}`);
   }
-  questionsCache = await parseQuestions(DOCX_PATH);
-  return questionsCache;
+  questionsCache[normLang] = await parseQuestions(docPath);
+  return questionsCache[normLang];
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +167,56 @@ async function listDriveFiles() {
   } while (pageToken);
 
   return filesMap;
+}
+
+// ---------------------------------------------------------------------------
+// Audio File Lookup Helpers
+// ---------------------------------------------------------------------------
+const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
+
+function findDriveFile(filesMap, prefixes) {
+  for (const prefix of prefixes) {
+    for (const ext of EXTS) {
+      const key = `${prefix}${ext}`;
+      if (filesMap.has(key)) {
+        return filesMap.get(key);
+      }
+    }
+  }
+  return null;
+}
+
+function getAudioPrefixes(qid, targetType, lang) {
+  const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+  const isOptions = targetType === 'options';
+
+  if (isOptions) {
+    const prefixes = [
+      `${qid}_options_${normLang}`,
+      `${qid}_opts_${normLang}`,
+      `${qid}_${normLang}_options`,
+      `${qid}_${normLang}_opts`,
+      `${qid}_options.${normLang}`,
+      `${qid}.${normLang}_options`,
+    ];
+    if (normLang === 'akan') {
+      prefixes.push(`${qid}_options`, `${qid}_opts`);
+    }
+    return prefixes;
+  } else {
+    const prefixes = [
+      `${qid}_question_${normLang}`,
+      `${qid}_${normLang}_question`,
+      `${qid}_question.${normLang}`,
+      `${qid}.${normLang}_question`,
+      `${qid}_${normLang}`,
+      `${qid}.${normLang}`,
+    ];
+    if (normLang === 'akan') {
+      prefixes.push(`${qid}_question`, qid);
+    }
+    return prefixes;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,26 +263,13 @@ app.get('/api/auth-status', (req, res) => {
   });
 });
 
-// Helper to look up file by variations of extensions
-function findDriveFile(filesMap, prefixes) {
-  const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
-  for (const prefix of prefixes) {
-    for (const ext of EXTS) {
-      const key = `${prefix}${ext}`;
-      if (filesMap.has(key)) {
-        return filesMap.get(key);
-      }
-    }
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // API Routes
 // ---------------------------------------------------------------------------
 app.get('/api/questions', async (req, res) => {
   try {
-    const questions = await getQuestions();
+    const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    const questions = await getQuestions(lang);
 
     let filesMap = new Map();
     try {
@@ -224,15 +279,17 @@ app.get('/api/questions', async (req, res) => {
     }
 
     const enriched = questions.map((q) => {
-      // Question audio can be `<id>_question` or `<id>`
-      const qFile = findDriveFile(filesMap, [`${q.id}_question`, q.id]);
-      // Options audio is `<id>_options` or `<id>_opts`
-      const optsFile = findDriveFile(filesMap, [`${q.id}_options`, `${q.id}_opts`]);
+      const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
+      const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
+
+      const qFile = findDriveFile(filesMap, qPrefixes);
+      const optsFile = findDriveFile(filesMap, optsPrefixes);
 
       const hasOptions = Array.isArray(q.options) && q.options.length > 0;
 
       return {
         ...q,
+        lang,
         hasQuestionAudio: !!qFile,
         questionDriveLink: qFile ? qFile.webViewLink : null,
         hasOptionsAudio: !!optsFile,
@@ -242,7 +299,7 @@ app.get('/api/questions', async (req, res) => {
       };
     });
 
-    res.json({ questions: enriched });
+    res.json({ lang, questions: enriched });
   } catch (err) {
     console.error('GET /api/questions error:', err);
     res.status(500).json({ error: err.message });
@@ -251,8 +308,9 @@ app.get('/api/questions', async (req, res) => {
 
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
-    const { questionId, targetType, replace } = req.body;
+    const { questionId, targetType, lang, replace } = req.body;
     // targetType: 'question' | 'options'
+    // lang: 'akan' | 'ewe'
 
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
@@ -261,6 +319,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
+    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const typeSuffix = targetType === 'options' ? '_options' : '_question';
 
     const mimeToExt = {
@@ -272,7 +331,8 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       'audio/x-m4a': '.m4a',
     };
     const ext = mimeToExt[req.file.mimetype] || '.webm';
-    const filename = `${questionId}${typeSuffix}${ext}`;
+    // Audio file qualified with ewe or akan
+    const filename = `${questionId}${typeSuffix}_${normLang}${ext}`;
 
     // 1. Save local backup
     const localPath = path.join(UPLOADS_DIR, filename);
@@ -286,14 +346,11 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
     }
 
-    // If replace=true, delete old file matching this target
+    // If replace=true, delete old file matching this target and language
     if (replace === 'true') {
       try {
         const existingMap = await listDriveFiles();
-        const prefixes = targetType === 'options' 
-          ? [`${questionId}_options`, `${questionId}_opts`]
-          : [`${questionId}_question`, questionId];
-        
+        const prefixes = getAudioPrefixes(questionId, targetType, normLang);
         const existing = findDriveFile(existingMap, prefixes);
         if (existing) {
           await drive.files.delete({ fileId: existing.fileId });
@@ -324,6 +381,7 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       success: true,
       fileId: driveRes.data.id,
       filename: driveRes.data.name,
+      lang: normLang,
       targetType: targetType || 'question',
       webViewLink: driveRes.data.webViewLink,
     });
@@ -335,7 +393,8 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
 
 app.get('/api/status', async (req, res) => {
   try {
-    const questions = await getQuestions();
+    const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    const questions = await getQuestions(lang);
     let filesMap = new Map();
     try {
       filesMap = await listDriveFiles();
@@ -343,8 +402,11 @@ app.get('/api/status', async (req, res) => {
 
     let fullyRecorded = 0;
     for (const q of questions) {
-      const qFile = findDriveFile(filesMap, [`${q.id}_question`, q.id]);
-      const optsFile = findDriveFile(filesMap, [`${q.id}_options`, `${q.id}_opts`]);
+      const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
+      const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
+
+      const qFile = findDriveFile(filesMap, qPrefixes);
+      const optsFile = findDriveFile(filesMap, optsPrefixes);
       const hasOptions = Array.isArray(q.options) && q.options.length > 0;
 
       if (hasOptions ? (qFile && optsFile) : qFile) {
@@ -352,7 +414,12 @@ app.get('/api/status', async (req, res) => {
       }
     }
 
-    res.json({ total: questions.length, recorded: fullyRecorded, missing: questions.length - fullyRecorded });
+    res.json({
+      lang,
+      total: questions.length,
+      recorded: fullyRecorded,
+      missing: questions.length - fullyRecorded,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -361,9 +428,15 @@ app.get('/api/status', async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`\n🎙️  DCS HCI Audio Collector running at http://localhost:${PORT}\n`);
   try {
-    const qs = await getQuestions();
-    console.log(`✅ Loaded ${qs.length} questions from questionnaire`);
+    const akanQs = await getQuestions('akan');
+    console.log(`✅ Loaded ${akanQs.length} questions for Akan`);
   } catch (err) {
-    console.warn(`⚠️  Could not parse questionnaire: ${err.message}`);
+    console.warn(`⚠️  Could not parse Akan questionnaire: ${err.message}`);
+  }
+  try {
+    const eweQs = await getQuestions('ewe');
+    console.log(`✅ Loaded ${eweQs.length} questions for Ewe`);
+  } catch (err) {
+    console.warn(`⚠️  Could not parse Ewe questionnaire: ${err.message}`);
   }
 });

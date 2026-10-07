@@ -1,12 +1,12 @@
 /**
  * questions-parser.js
- * Parses a .docx questionnaire and extracts question IDs, prompt text, and options.
+ * Parses a .docx questionnaire (Akan or Ewe) and extracts question IDs, prompt text, and options.
  * Question lines are identified by a leading code like C1, P6, R1a, M12, etc.
  */
 
 const mammoth = require('mammoth');
 
-const QUESTION_ID_RE = /^([A-Z][A-Z0-9]?[0-9]+[a-z]?)\s+(Required|Optional)(.*)/;
+const QUESTION_HEADER_RE = /^([A-Z][A-Z0-9]?[0-9]+[a-z]?)\s+(Ehiã|Lɔlɔ̃nu|Required|Optional|Disability|Ame siwo)(.*)/;
 
 /**
  * Parse questions from a .docx file.
@@ -23,25 +23,40 @@ async function parseQuestions(docxPath) {
   const questions = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(QUESTION_ID_RE);
+    const match = lines[i].match(QUESTION_HEADER_RE);
     if (!match) continue;
 
     const id = match[1];
-    const required = match[2] === 'Required';
+    const statusWord = match[2];
+    const required =
+      statusWord === 'Required' ||
+      statusWord === 'Ehiã' ||
+      statusWord === 'Disability' ||
+      statusWord === 'Ame siwo';
 
     let text = '';
     const options = [];
 
+    // For R1a in both questionnaires, prompt begins on header line
+    if (statusWord === 'Disability' || statusWord === 'Ame siwo') {
+      text = (statusWord + match[3]).trim();
+    }
+
     // Collect subsequent lines until the next question header
     for (let j = i + 1; j < lines.length; j++) {
       const line = lines[j];
-      if (QUESTION_ID_RE.test(line)) break;
+      if (QUESTION_HEADER_RE.test(line)) break;
 
       if (
         !text &&
         !line.startsWith('Interviewer instruction') &&
         !line.startsWith('Enumerator') &&
-        !line.startsWith('☐')
+        !line.startsWith('Mɔfiame') &&
+        !line.startsWith('Nyabiasea') &&
+        !line.startsWith('☐') &&
+        !line.startsWith('#') &&
+        !line.startsWith('Ŋkɔ gbãtɔ') &&
+        !line.startsWith('First name')
       ) {
         text = line;
       }

@@ -1,11 +1,12 @@
 /**
  * app.js  —  DCS HCI Audio Collector frontend
- * Supports separate audio tracks for Question Prompt and Question Options.
+ * Supports Akan and Ewe languages, with separate audio tracks for Question Prompt and Question Options.
  */
 
 'use strict';
 
 // ── State ──────────────────────────────────────────────────────────────────
+let currentLang    = localStorage.getItem('dcs_audio_lang') || 'akan';
 let allQuestions   = [];
 let currentQ       = null;
 let currentTrack   = 'question'; // 'question' | 'options'
@@ -31,6 +32,12 @@ const modal        = document.getElementById('record-modal');
 const modalQid     = document.getElementById('modal-qid');
 const modalTitle   = document.getElementById('modal-title');
 const modalClose   = document.getElementById('modal-close-btn');
+
+// Language switchers
+const btnLangAkan      = document.getElementById('lang-btn-akan');
+const btnLangEwe       = document.getElementById('lang-btn-ewe');
+const btnModalLangAkan = document.getElementById('modal-lang-akan');
+const btnModalLangEwe  = document.getElementById('modal-lang-ewe');
 
 // Track tabs
 const trackSwitcher    = document.getElementById('track-switcher');
@@ -62,7 +69,9 @@ const badgeDriveConnected = document.getElementById('badge-drive-connected');
 // ── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
   await checkAuthStatus();
-  await loadQuestions();
+  bindLangButtons();
+  setLanguageUI(currentLang);
+  await loadQuestions(currentLang);
   bindToolbar();
   bindTrackTabs();
 })();
@@ -83,19 +92,71 @@ async function checkAuthStatus() {
   }
 }
 
+// ── Language handling ──────────────────────────────────────────────────────
+function bindLangButtons() {
+  if (btnLangAkan) btnLangAkan.addEventListener('click', () => switchLanguage('akan'));
+  if (btnLangEwe)  btnLangEwe.addEventListener('click', () => switchLanguage('ewe'));
+
+  if (btnModalLangAkan) btnModalLangAkan.addEventListener('click', () => switchLanguage('akan'));
+  if (btnModalLangEwe)  btnModalLangEwe.addEventListener('click', () => switchLanguage('ewe'));
+}
+
+function setLanguageUI(lang) {
+  if (btnLangAkan) btnLangAkan.classList.toggle('active', lang === 'akan');
+  if (btnLangEwe)  btnLangEwe.classList.toggle('active', lang === 'ewe');
+
+  if (btnModalLangAkan) btnModalLangAkan.classList.toggle('active', lang === 'akan');
+  if (btnModalLangEwe)  btnModalLangEwe.classList.toggle('active', lang === 'ewe');
+}
+
+async function switchLanguage(lang) {
+  if (lang === currentLang) return;
+
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    if (!confirm('Switching language will discard the current recording. Continue?')) {
+      return;
+    }
+    stopRecording(false);
+  }
+
+  currentLang = lang;
+  localStorage.setItem('dcs_audio_lang', currentLang);
+  setLanguageUI(currentLang);
+
+  const openQId = currentQ ? currentQ.id : null;
+  const preferredTrack = currentTrack;
+
+  grid.innerHTML = `<div class="loading-state">
+    <div class="spinner"></div>
+    <p>Loading ${currentLang === 'ewe' ? 'Ewe' : 'Akan'} questions…</p>
+  </div>`;
+
+  await loadQuestions(currentLang);
+
+  // If modal was open, refresh with the question in the newly selected language
+  if (openQId && !modal.hidden) {
+    const updatedQ = allQuestions.find(x => x.id === openQId);
+    if (updatedQ) {
+      openModal(updatedQ, preferredTrack);
+    } else {
+      closeModal();
+    }
+  }
+}
+
 // ── Data loading ───────────────────────────────────────────────────────────
-async function loadQuestions() {
+async function loadQuestions(lang = currentLang) {
   try {
-    const res = await fetch('/api/questions');
+    const res = await fetch(`/api/questions?lang=${encodeURIComponent(lang)}`);
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
     allQuestions = data.questions;
     updateStats();
-    renderGrid(allQuestions);
+    applyFilters();
   } catch (err) {
     grid.innerHTML = `<div class="empty-state">
       <p>⚠️ Could not load questions: ${err.message}</p>
-      <p style="font-size:.8rem;margin-top:8px">Check that the server is running and DOCX_PATH is configured.</p>
+      <p style="font-size:.8rem;margin-top:8px">Check that the server is running and questionnaire file is available.</p>
     </div>`;
   }
 }
@@ -136,9 +197,14 @@ function buildCard(q) {
     badgeLabel = '⏳ Partial';
   }
 
+  const langLabel = currentLang.toUpperCase();
+
   card.innerHTML = `
     <div class="card-top">
-      <span class="q-id">${q.id}</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span class="q-id">${q.id}</span>
+        <span class="card-lang-tag">${langLabel}</span>
+      </div>
       <span class="q-badge ${q.hasAudio ? 'recorded' : (badgeLabel.includes('Partial') ? 'recorded' : 'missing')}">
         ${badgeLabel}
       </span>
@@ -276,6 +342,8 @@ function openModal(q, preferredTrack = 'question') {
   modalQid.textContent = q.id;
   modalTitle.textContent = q.text || 'No question text';
   modalPromptText.textContent = q.text || 'No prompt available';
+
+  setLanguageUI(currentLang);
 
   const hasOpts = Array.isArray(q.options) && q.options.length > 0;
 
@@ -424,9 +492,13 @@ async function uploadAudio() {
   const ext      = blobExtension(recordedBlob.type);
   const suffix   = currentTrack === 'options' ? '_options' : '_question';
 
-  formData.append('audio', recordedBlob, `${currentQ.id}${suffix}${ext}`);
+  // Audio file qualified with ewe or akan extension
+  const audioFileName = `${currentQ.id}${suffix}_${currentLang}${ext}`;
+
+  formData.append('audio', recordedBlob, audioFileName);
   formData.append('questionId', currentQ.id);
   formData.append('targetType', currentTrack);
+  formData.append('lang', currentLang);
   formData.append('replace', 'true');
 
   try {

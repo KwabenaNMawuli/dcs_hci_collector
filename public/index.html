@@ -18,6 +18,19 @@
           <p class="header-subtitle">DCS HCI Questionnaire Recording Tool</p>
         </div>
       </div>
+
+      <!-- Language Switcher Buttons -->
+      <div class="lang-switcher-container">
+        <div class="lang-toggle-group" role="group" aria-label="Select Questionnaire Language">
+          <button type="button" class="lang-btn active" id="lang-btn-akan" data-lang="akan" title="Switch to Akan">
+            <span class="lang-flag">🇬🇭</span> Akan
+          </button>
+          <button type="button" class="lang-btn" id="lang-btn-ewe" data-lang="ewe" title="Switch to Ewe">
+            <span class="lang-flag">🇬🇭</span> Ewe
+          </button>
+        </div>
+      </div>
+
       <div id="status-bar" class="status-bar">
         <div class="status-chip" id="chip-recorded">
           <span class="chip-dot dot-green"></span>
@@ -75,8 +88,14 @@
   <div id="record-modal" class="modal-overlay" hidden>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
-        <div>
-          <span class="modal-qid" id="modal-qid"></span>
+        <div class="modal-header-left">
+          <div class="modal-id-bar">
+            <span class="modal-qid" id="modal-qid"></span>
+            <div class="modal-lang-toggle" role="group" aria-label="Question Language">
+              <button type="button" class="modal-lang-btn active" id="modal-lang-akan" data-lang="akan">Akan</button>
+              <button type="button" class="modal-lang-btn" id="modal-lang-ewe" data-lang="ewe">Ewe</button>
+            </div>
+          </div>
           <h2 id="modal-title" class="modal-qtitle"></h2>
         </div>
         <button class="modal-close" id="modal-close-btn" aria-label="Close">✕</button>
@@ -128,7 +147,7 @@
 
       <!-- Replace warning -->
       <div id="replace-warning" class="replace-warning" hidden>
-        ⚠️ This question already has an audio file. Uploading will <strong>replace</strong> it.
+        ⚠️ This track already has an audio file. Uploading will <strong>replace</strong> it.
       </div>
 
       <!-- Upload -->
@@ -144,4 +163,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

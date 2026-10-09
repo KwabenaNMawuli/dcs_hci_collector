@@ -15,7 +15,7 @@
         <span class="mic-icon">🎧</span>
         <div>
           <h1>Practice Round</h1>
-          <p class="header-subtitle">Warm-up only — nothing is uploaded or saved</p>
+          <p class="header-subtitle">Warm-up only — saved only if you choose, in a separate folder</p>
         </div>
       </div>
 
@@ -50,6 +50,12 @@
       <button id="btn-play" class="btn btn-play" disabled><span class="btn-icon">▶</span> Play</button>
     </div>
     <audio id="playback-audio" style="display:none"></audio>
+
+    <div class="practice-save">
+      <button id="btn-save" class="btn btn-upload" disabled>💾 Save practice take</button>
+      <span id="save-status" class="upload-status"></span>
+      <p class="practice-note">Optional. Saved separately in the <strong>practice</strong> folder, never with the real recordings.</p>
+    </div>
 
     <div class="practice-nav">
       <button id="btn-prev" class="btn btn-stop" disabled>← Previous</button>

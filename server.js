@@ -306,7 +306,37 @@ app.get('/api/questions', async (req, res) => {
   }
 });
 
-app.post('/api/upload', upload.single('audio'), async (req, res) => {
+// Warm-up practice set: a spread of questions across the questionnaire, no Drive involved.
+// Pass ?ids=C1,P2,... to get the same questions in another language.
+app.get('/api/practice', async (req, res) => {
+  try {
+    const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    const count = Math.min(Math.max(parseInt(req.query.count, 10) || 15, 1), 30);
+    const all = (await getQuestions(lang)).filter((q) => q.text);
+
+    let picked;
+    if (req.query.ids) {
+      const wanted = String(req.query.ids).split(',');
+      picked = wanted.map((id) => all.find((q) => q.id === id)).filter(Boolean);
+    } else {
+      // one random question from each of `count` equal slices, so the set spans the whole form
+      picked = [];
+      const size = all.length / Math.min(count, all.length);
+      for (let i = 0; i < Math.min(count, all.length); i++) {
+        const start = Math.floor(i * size);
+        const end = Math.max(start + 1, Math.floor((i + 1) * size));
+        picked.push(all[start + Math.floor(Math.random() * (end - start))]);
+      }
+    }
+
+    res.json({ lang, questions: picked });
+  } catch (err) {
+    console.error('GET /api/practice error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/upload',upload.single('audio'), async (req, res) => {
   try {
     const { questionId, targetType, lang, replace } = req.body;
     // targetType: 'question' | 'options'

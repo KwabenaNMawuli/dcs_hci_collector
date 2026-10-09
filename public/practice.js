@@ -1,6 +1,7 @@
 /**
  * practice.js — warm-up round for recorders.
- * Recordings stay in the browser; nothing is uploaded.
+ * Recordings stay in the browser unless "Save practice take" is pressed, which sends them
+ * to the separate practice folder (never the real recordings).
  */
 
 'use strict';
@@ -17,6 +18,7 @@ let analyser      = null;
 let animFrameId   = null;
 let timerInterval = null;
 let seconds       = 0;
+let takeBlob      = null;
 
 const card      = document.getElementById('practice-card');
 const counter   = document.getElementById('p-counter');
@@ -26,7 +28,9 @@ const btnStop   = document.getElementById('btn-stop');
 const btnPlay   = document.getElementById('btn-play');
 const btnPrev   = document.getElementById('btn-prev');
 const btnNext   = document.getElementById('btn-next');
-const btnNew    = document.getElementById('btn-new-set');
+const btnSave   = document.getElementById('btn-save');
+const saveStatus= document.getElementById('save-status');
+const btnNew    =document.getElementById('btn-new-set');
 const timerEl   = document.getElementById('record-timer');
 const canvas    = document.getElementById('waveform');
 const audioEl   = document.getElementById('playback-audio');
@@ -139,8 +143,11 @@ async function startRecording() {
   mediaRecorder = new MediaRecorder(micStream, mimeType ? { mimeType } : {});
   mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) chunks.push(e.data); });
   mediaRecorder.addEventListener('stop', () => {
-    audioEl.src = URL.createObjectURL(new Blob(chunks, { type: mimeType || 'audio/webm' }));
+    takeBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+    audioEl.src = URL.createObjectURL(takeBlob);
     btnPlay.disabled = false;
+    btnSave.disabled = false;
+    saveStatus.textContent = '';
   });
   mediaRecorder.start(250);
 
@@ -176,8 +183,38 @@ function resetRecording() {
   btnPlay.disabled = true;
   btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play';
   timerEl.textContent = '00:00';
+  takeBlob = null;
+  btnSave.disabled = true;
+  saveStatus.textContent = '';
   clearWaveform();
 }
+
+btnSave.addEventListener('click', async () => {
+  const q = questions[index];
+  if (!takeBlob || !q) return;
+
+  btnSave.disabled = true;
+  saveStatus.className = 'upload-status';
+  saveStatus.textContent = '⏳ Saving…';
+
+  const ext = takeBlob.type.includes('ogg') ? '.ogg' : takeBlob.type.includes('mp4') ? '.m4a' : '.webm';
+  const form = new FormData();
+  form.append('audio', takeBlob, `practice${ext}`);
+  form.append('questionId', q.id);
+  form.append('lang', lang);
+
+  try {
+    const res = await fetch('/api/practice-upload', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+    saveStatus.className = 'upload-status success';
+    saveStatus.textContent = `✅ Saved to practice folder as ${data.filename}`;
+  } catch (err) {
+    saveStatus.className = 'upload-status error';
+    saveStatus.textContent = `❌ Save failed: ${err.message}`;
+    btnSave.disabled = false;
+  }
+});
 
 function drawWaveform() {
   const ctx = canvas.getContext('2d');

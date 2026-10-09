@@ -69,6 +69,19 @@
   gap: 12px;
 }
 
+.practice-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.practice-note {
+  flex-basis: 100%;
+  font-size: .8rem;
+  color: var(--clr-muted);
+}
+
 .practice-done {
   text-align: center;
   padding: 16px 0;

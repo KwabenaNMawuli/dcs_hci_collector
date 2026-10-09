@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Practice — DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="practice.css" />
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-title">
+        <span class="mic-icon">🎧</span>
+        <div>
+          <h1>Practice Round</h1>
+          <p class="header-subtitle">Warm-up only — nothing is uploaded or saved</p>
+        </div>
+      </div>
+
+      <div class="lang-switcher-container">
+        <div class="lang-toggle-group" role="group" aria-label="Select language">
+          <button type="button" class="lang-btn active" id="lang-btn-akan" data-lang="akan">Akan</button>
+          <button type="button" class="lang-btn" id="lang-btn-ewe" data-lang="ewe">Ewe</button>
+        </div>
+      </div>
+
+      <a href="/" class="auth-btn">← Back to recorder</a>
+    </div>
+  </header>
+
+  <main class="practice-main">
+    <div class="practice-progress">
+      <span id="p-counter">—</span>
+      <div class="p-bar"><div id="p-bar-fill"></div></div>
+      <button type="button" class="btn-mini btn-mini-play" id="btn-new-set">🔀 New set</button>
+    </div>
+
+    <section class="practice-card" id="practice-card">
+      <div class="loading-state"><div class="spinner"></div><p>Loading questions…</p></div>
+    </section>
+
+    <canvas id="waveform" class="waveform" width="600" height="80" aria-hidden="true"></canvas>
+    <div class="record-timer" id="record-timer">00:00</div>
+
+    <div class="record-controls">
+      <button id="btn-record" class="btn btn-record"><span class="btn-icon">●</span> Record</button>
+      <button id="btn-stop" class="btn btn-stop" disabled><span class="btn-icon">■</span> Stop</button>
+      <button id="btn-play" class="btn btn-play" disabled><span class="btn-icon">▶</span> Play</button>
+    </div>
+    <audio id="playback-audio" style="display:none"></audio>
+
+    <div class="practice-nav">
+      <button id="btn-prev" class="btn btn-stop" disabled>← Previous</button>
+      <button id="btn-next" class="btn btn-play">Next →</button>
+    </div>
+  </main>
+
+  <script src="practice.js"></script>
+</body>
+</html>

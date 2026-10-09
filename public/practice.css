@@ -1,0 +1,77 @@
+/* Practice page — builds on styles.css tokens and shared controls */
+
+.practice-main {
+  max-width: 720px;
+  margin: 24px auto;
+  padding: 0 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.practice-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: .9rem;
+  color: var(--clr-muted);
+}
+
+.p-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--clr-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#p-bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--clr-primary);
+  transition: width var(--transition);
+}
+
+.practice-card {
+  background: var(--clr-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 24px;
+}
+
+.practice-card .p-qid {
+  font-weight: 700;
+  color: var(--clr-primary);
+  margin-right: 8px;
+}
+
+.practice-card .p-text {
+  font-size: 1.4rem;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+
+.practice-card .p-opts-title {
+  margin-top: 16px;
+  font-size: .85rem;
+  color: var(--clr-muted);
+}
+
+.practice-card ol {
+  margin: 8px 0 0 20px;
+  line-height: 1.8;
+  font-size: 1.1rem;
+}
+
+.practice-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.practice-done {
+  text-align: center;
+  padding: 16px 0;
+}
+
+.practice-done .btn { margin-top: 16px; }

@@ -421,7 +421,77 @@ app.post('/api/upload',upload.single('audio'), async (req, res) => {
   }
 });
 
-app.get('/api/status', async (req, res) => {
+// ---------------------------------------------------------------------------
+// Practice takes — kept in a separate "practice" sub-folder (local and Drive) so they
+// can never be mistaken for, or overwrite, real recordings.
+// ---------------------------------------------------------------------------
+const PRACTICE_DIR = path.join(UPLOADS_DIR, 'practice');
+let practiceDriveFolderId = null;
+
+async function getPracticeDriveFolder(drive, parentId) {
+  if (practiceDriveFolderId) return practiceDriveFolderId;
+
+  const found = await drive.files.list({
+    q: `'${parentId}' in parents and name = 'practice' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id)',
+    pageSize: 1,
+  });
+  if (found.data.files.length) {
+    practiceDriveFolderId = found.data.files[0].id;
+  } else {
+    const created = await drive.files.create({
+      requestBody: { name: 'practice', parents: [parentId], mimeType: 'application/vnd.google-apps.folder' },
+      fields: 'id',
+    });
+    practiceDriveFolderId = created.data.id;
+  }
+  return practiceDriveFolderId;
+}
+
+app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
+  try {
+    const { questionId, lang } = req.body;
+    if (!questionId || !/^[A-Za-z0-9]+$/.test(questionId)) {
+      return res.status(400).json({ error: 'A valid questionId is required' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    const ext = path.extname(req.file.originalname || '') || '.webm';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `practice_${questionId}_${normLang}_${stamp}${ext}`;
+
+    fs.mkdirSync(PRACTICE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(PRACTICE_DIR, filename), req.file.buffer);
+
+    const parentId = (DRIVE_FOLDER_ID || '').trim();
+    if (!parentId) {
+      return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
+    }
+
+    const drive = getDriveClient();
+    const folderId = await getPracticeDriveFolder(drive, parentId);
+
+    const bufferStream = new Readable();
+    bufferStream.push(req.file.buffer);
+    bufferStream.push(null);
+
+    const driveRes = await drive.files.create({
+      requestBody: { name: filename, parents: [folderId], mimeType: req.file.mimetype },
+      media: { mimeType: req.file.mimetype, body: bufferStream },
+      fields: 'id, name',
+    });
+
+    res.json({ success: true, filename: driveRes.data.name });
+  } catch (err) {
+    console.error('POST /api/practice-upload error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/status',async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const questions = await getQuestions(lang);

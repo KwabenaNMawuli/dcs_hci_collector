@@ -64,30 +64,123 @@ const upload = multer({
 });
 
 // ---------------------------------------------------------------------------
-// Google OAuth 2.0 Client
+// Google OAuth 2.0 Client & Token Persistence
 // ---------------------------------------------------------------------------
-function getOAuth2Client() {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    return null;
+let cachedOAuth2Client = null;
+
+function persistRefreshTokenToEnv(refreshToken) {
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return;
+
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    if (envContent.includes('GOOGLE_REFRESH_TOKEN=')) {
+      envContent = envContent.replace(
+        /GOOGLE_REFRESH_TOKEN=.*/g,
+        `GOOGLE_REFRESH_TOKEN=${refreshToken}`
+      );
+    } else {
+      envContent += `\n# Google OAuth Persistent Refresh Token\nGOOGLE_REFRESH_TOKEN=${refreshToken}\n`;
+    }
+    fs.writeFileSync(envPath, envContent, 'utf8');
+    process.env.GOOGLE_REFRESH_TOKEN = refreshToken;
+  } catch (err) {
+    console.warn('Could not persist refresh token to .env:', err.message);
   }
-  return new google.auth.OAuth2(
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-    GOOGLE_REDIRECT_URI
-  );
+}
+
+function saveTokens(newTokens) {
+  let existing = {};
+  if (fs.existsSync(TOKEN_PATH)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+    } catch (_) {}
+  }
+
+  // Ensure refresh_token is never wiped out when receiving refreshed access tokens
+  const merged = {
+    ...existing,
+    ...newTokens,
+    refresh_token: newTokens.refresh_token || existing.refresh_token || process.env.GOOGLE_REFRESH_TOKEN,
+  };
+
+  try {
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to write tokens.json:', err.message);
+  }
+
+  if (merged.refresh_token) {
+    persistRefreshTokenToEnv(merged.refresh_token);
+  }
+
+  return merged;
 }
 
 function loadSavedTokens(oauth2Client) {
+  let tokens = null;
   if (fs.existsSync(TOKEN_PATH)) {
     try {
-      const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
-      oauth2Client.setCredentials(tokens);
-      return true;
+      tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
     } catch (e) {
       console.warn('Error reading tokens.json:', e.message);
     }
   }
+
+  if (!tokens || (!tokens.refresh_token && !tokens.access_token)) {
+    if (process.env.GOOGLE_REFRESH_TOKEN) {
+      tokens = { refresh_token: process.env.GOOGLE_REFRESH_TOKEN.trim() };
+    } else if (process.env.GOOGLE_TOKENS_JSON) {
+      try {
+        tokens = JSON.parse(process.env.GOOGLE_TOKENS_JSON);
+      } catch (_) {}
+    }
+  }
+
+  if (tokens) {
+    // If tokens on disk lack refresh_token but env has it, preserve it
+    if (!tokens.refresh_token && process.env.GOOGLE_REFRESH_TOKEN) {
+      tokens.refresh_token = process.env.GOOGLE_REFRESH_TOKEN.trim();
+    }
+
+    if (tokens.refresh_token || tokens.access_token) {
+      oauth2Client.setCredentials(tokens);
+      return true;
+    }
+  }
+
   return false;
+}
+
+function getOAuth2Client() {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    return null;
+  }
+
+  if (!cachedOAuth2Client) {
+    cachedOAuth2Client = new google.auth.OAuth2(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET,
+      GOOGLE_REDIRECT_URI
+    );
+
+    loadSavedTokens(cachedOAuth2Client);
+
+    cachedOAuth2Client.on('tokens', (tokens) => {
+      try {
+        const merged = saveTokens(tokens);
+        cachedOAuth2Client.setCredentials({
+          ...cachedOAuth2Client.credentials,
+          ...merged,
+        });
+        console.log('🔄 Google OAuth access token refreshed and saved successfully.');
+      } catch (err) {
+        console.error('Failed to update tokens on refresh:', err.message);
+      }
+    });
+  }
+
+  return cachedOAuth2Client;
 }
 
 function getDriveClient() {
@@ -96,20 +189,16 @@ function getDriveClient() {
     throw new Error('Google OAuth Client ID & Secret are not configured in .env');
   }
 
-  const hasTokens = loadSavedTokens(oauth2Client);
-  if (!hasTokens) {
-    throw new Error('Google account not connected. Please click "Connect Google Drive".');
-  }
+  const hasCredentials =
+    oauth2Client.credentials &&
+    (oauth2Client.credentials.refresh_token || oauth2Client.credentials.access_token);
 
-  oauth2Client.on('tokens', (tokens) => {
-    try {
-      const current = fs.existsSync(TOKEN_PATH) ? JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8')) : {};
-      const updated = { ...current, ...tokens };
-      fs.writeFileSync(TOKEN_PATH, JSON.stringify(updated, null, 2));
-    } catch (err) {
-      console.error('Failed to update tokens.json:', err.message);
+  if (!hasCredentials) {
+    const loaded = loadSavedTokens(oauth2Client);
+    if (!loaded) {
+      throw new Error('Google account not connected. Please click "Connect Google Drive".');
     }
-  });
+  }
 
   return google.drive({ version: 'v3', auth: oauth2Client });
 }
@@ -246,7 +335,9 @@ app.get('/oauth2callback', async (req, res) => {
   try {
     const oauth2Client = getOAuth2Client();
     const { tokens } = await oauth2Client.getToken(code);
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
+    const merged = saveTokens(tokens);
+    oauth2Client.setCredentials(merged);
+    console.log('✅ Google Drive connected. Persistent tokens saved.');
     res.redirect('/?auth=success');
   } catch (err) {
     console.error('Error exchanging OAuth code:', err);
@@ -256,7 +347,13 @@ app.get('/oauth2callback', async (req, res) => {
 
 app.get('/api/auth-status', (req, res) => {
   const oauthConfigured = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
-  const isAuthenticated = fs.existsSync(TOKEN_PATH);
+  const oauth2Client = getOAuth2Client();
+  const isAuthenticated = Boolean(
+    (oauth2Client && oauth2Client.credentials && (oauth2Client.credentials.refresh_token || oauth2Client.credentials.access_token)) ||
+    fs.existsSync(TOKEN_PATH) ||
+    process.env.GOOGLE_REFRESH_TOKEN
+  );
+
   res.json({
     configured: oauthConfigured,
     authenticated: isAuthenticated,

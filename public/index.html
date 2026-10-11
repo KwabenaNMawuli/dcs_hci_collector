@@ -9,7 +9,6 @@
 <body>
 
   <!-- ── Header ─────────────────────────────────────────────────── -->
-  <!-- ── Header ─────────────────────────────────────────────────── -->
   <header class="app-header">
     <div class="header-inner">
       <div class="header-brand">
@@ -21,6 +20,14 @@
       </div>
 
       <div class="header-controls">
+        <!-- Contributor User Switcher -->
+        <div class="user-badge-container">
+          <span class="user-label">👤 Contributor:</span>
+          <button type="button" class="btn-user-tag" id="btn-user-select" title="Click to change your contributor name">
+            <span id="current-user-name">default_user</span> ✏️
+          </button>
+        </div>
+
         <!-- Language Switcher Buttons -->
         <div class="lang-switcher-container">
           <div class="lang-toggle-group" role="group" aria-label="Select Questionnaire Language">
@@ -34,6 +41,7 @@
         </div>
 
         <a href="/practice.html" class="nav-btn" title="Warm-up round, nothing is uploaded">🎧 Practice</a>
+        <a href="/admin.html" class="nav-btn admin-nav-btn" title="Administrative dashboard and statistics">🛡️ Admin</a>
 
         <div id="drive-auth-container" class="drive-auth-group">
           <a id="btn-auth-drive" href="/auth/google" class="nav-btn" style="display:none;">
@@ -42,49 +50,9 @@
           <span id="badge-drive-connected" class="auth-status-badge" style="display:none;">
             <span class="pulse-dot"></span> ☁️ Drive Connected
           </span>
-          <a id="btn-reauth-drive" href="/auth/google" class="nav-btn auth-reconnect-btn" style="display:none;" title="Click to reconnect or grant full permissions to see prior recordings">
+          <a id="btn-reauth-drive" href="/auth/google" class="nav-btn auth-reconnect-btn" style="display:none;" title="Click to reconnect or grant full permissions">
             🔄 Reconnect Drive
           </a>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Subheader Stats Ribbon ─────────────────────────────────── -->
-    <div class="stats-ribbon">
-      <div class="stats-ribbon-inner">
-        <div class="stats-chips-group" id="status-bar">
-          <div class="status-chip chip-recorded" id="chip-recorded" title="Fully recorded questions">
-            <span class="chip-dot dot-green"></span>
-            <span class="chip-val" id="stat-recorded">—</span>
-            <span class="chip-label">recorded</span>
-          </div>
-          <div class="status-chip chip-partial" id="chip-partial" style="display:none;" title="Questions with only one track recorded">
-            <span class="chip-dot dot-yellow"></span>
-            <span class="chip-val" id="stat-partial">—</span>
-            <span class="chip-label">partial</span>
-          </div>
-          <div class="status-chip chip-missing" id="chip-missing" title="Unrecorded questions">
-            <span class="chip-dot dot-orange"></span>
-            <span class="chip-val" id="stat-missing">—</span>
-            <span class="chip-label">missing</span>
-          </div>
-          <div class="status-chip chip-drive-audios" id="chip-total-audios" style="display:none;" title="Total recognized audio files in Drive">
-            <span class="chip-dot dot-blue"></span>
-            <span class="chip-val" id="stat-drive-files">—</span>
-            <span class="chip-label">audios in Drive</span>
-          </div>
-          <div class="status-chip chip-total" title="Total questions in questionnaire">
-            <span class="chip-dot dot-grey"></span>
-            <span class="chip-val" id="stat-total">—</span>
-            <span class="chip-label">total</span>
-          </div>
-        </div>
-
-        <div class="stats-progress-group">
-          <div class="stats-progress-bar">
-            <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
-          </div>
-          <span class="stats-progress-text" id="stats-progress-text">0% complete</span>
         </div>
       </div>
     </div>
@@ -101,13 +69,7 @@
       />
     </div>
     <div class="filter-wrap">
-      <label class="filter-label">Show:</label>
-      <select id="filter-select" aria-label="Filter questions">
-        <option value="all">All questions</option>
-        <option value="missing">Missing audio (unrecorded)</option>
-        <option value="partial">Partially recorded</option>
-        <option value="recorded">Fully recorded</option>
-      </select>
+      <span class="collector-badge">Format: <strong>MP3 (128 kbps)</strong></span>
     </div>
   </div>
 
@@ -118,6 +80,31 @@
       <p>Loading questions…</p>
     </div>
   </main>
+
+  <!-- ── User Switcher Modal ────────────────────────────────────── -->
+  <div id="user-modal" class="modal-overlay" hidden>
+    <div class="modal-box user-modal-box">
+      <div class="modal-header">
+        <h3 style="margin:0;font-size:1.15rem;">👤 Contributor Profile</h3>
+        <button class="modal-close" id="user-modal-close-btn" aria-label="Close">✕</button>
+      </div>
+      <p style="margin:12px 0 16px;color:#475569;font-size:0.9rem;line-height:1.4;">
+        Enter your name or ID. All recordings you make will be saved into your own dedicated folder in Google Drive and local storage.
+      </p>
+      <div style="display:flex;gap:8px;">
+        <input
+          type="text"
+          id="input-username"
+          placeholder="e.g. John Doe, Ama, User_1"
+          maxlength="40"
+          style="flex:1;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.95rem;"
+        />
+        <button type="button" id="btn-save-user" class="btn btn-record" style="padding:8px 16px;">
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- ── Recording modal ────────────────────────────────────────── -->
   <div id="record-modal" class="modal-overlay" hidden>
@@ -173,7 +160,7 @@
           <span class="btn-icon">■</span> Stop
         </button>
         <button id="btn-play" class="btn btn-play" title="Play back recording" disabled>
-          <span class="btn-icon">▶</span> Play
+          <span class="btn-icon">▶</span> Play (MP3)
         </button>
       </div>
 
@@ -182,19 +169,22 @@
 
       <!-- Replace warning -->
       <div id="replace-warning" class="replace-warning" hidden>
-        ⚠️ This track already has an audio file. Uploading will <strong>replace</strong> it.
+        ⚠️ You previously recorded this track in this session. Uploading will update your take.
       </div>
 
       <!-- Upload -->
       <div class="upload-row">
         <button id="btn-upload" class="btn btn-upload" disabled>
-          ☁️ Upload to Drive
+          ☁️ Upload MP3 to Folder
         </button>
         <div id="upload-status" class="upload-status"></div>
       </div>
     </div>
   </div>
 
+  <!-- Vendor MP3 encoder & helper -->
+  <script src="/vendor/lame.all.min.js"></script>
+  <script src="/mp3-encoder.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

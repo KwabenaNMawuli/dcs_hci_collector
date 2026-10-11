@@ -1,15 +1,20 @@
 /**
  * app.js  —  DCS HCI Audio Collector frontend
- * Supports Akan and Ewe languages, with separate audio tracks for Question Prompt and Question Options.
+ * Supports Akan and Ewe languages, per-user folder recording, MP3 encoding,
+ * and clean questionnaire layout without biased status markers.
  */
 
 'use strict';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let currentLang    = localStorage.getItem('dcs_audio_lang') || 'akan';
+let currentUser    = localStorage.getItem('dcs_audio_user') || 'default_user';
 let allQuestions   = [];
 let currentQ       = null;
 let currentTrack   = 'question'; // 'question' | 'options'
+
+// Session takes: keeps track of questions recorded in current session
+const sessionRecorded = new Set();
 
 // MediaRecorder state
 let mediaRecorder  = null;
@@ -27,7 +32,6 @@ let animFrameId    = null;
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const grid         = document.getElementById('question-grid');
 const searchInput  = document.getElementById('search-input');
-const filterSelect = document.getElementById('filter-select');
 const modal        = document.getElementById('record-modal');
 const modalQid     = document.getElementById('modal-qid');
 const modalTitle   = document.getElementById('modal-title');
@@ -60,18 +64,12 @@ const replaceWarn  = document.getElementById('replace-warning');
 const timerEl      = document.getElementById('record-timer');
 const canvas       = document.getElementById('waveform');
 const playbackAudio= document.getElementById('playback-audio');
-const statRecorded = document.getElementById('stat-recorded');
-const statPartial  = document.getElementById('stat-partial');
-const chipPartial  = document.getElementById('chip-partial');
-const statMissing  = document.getElementById('stat-missing');
-const statTotal    = document.getElementById('stat-total');
-const statDriveFiles = document.getElementById('stat-drive-files');
-const chipTotalAudios = document.getElementById('chip-total-audios');
 const btnAuthDrive = document.getElementById('btn-auth-drive');
 const badgeDriveConnected = document.getElementById('badge-drive-connected');
 
 // ── Init ───────────────────────────────────────────────────────────────────
 (async function init() {
+  initUser();
   await checkAuthStatus();
   bindLangButtons();
   setLanguageUI(currentLang);
@@ -79,6 +77,54 @@ const badgeDriveConnected = document.getElementById('badge-drive-connected');
   bindToolbar();
   bindTrackTabs();
 })();
+
+// ── User Identity ──────────────────────────────────────────────────────────
+function initUser() {
+  const nameEl = document.getElementById('current-user-name');
+  if (nameEl) nameEl.textContent = currentUser;
+
+  const btnSelect = document.getElementById('btn-user-select');
+  const userModal = document.getElementById('user-modal');
+  const userModalClose = document.getElementById('user-modal-close-btn');
+  const btnSaveUser = document.getElementById('btn-save-user');
+  const inputUser = document.getElementById('input-username');
+
+  function openUserModal() {
+    inputUser.value = currentUser === 'default_user' ? '' : currentUser;
+    userModal.hidden = false;
+    inputUser.focus();
+  }
+
+  function closeUserModal() {
+    userModal.hidden = true;
+  }
+
+  function saveUser() {
+    const raw = inputUser.value.trim().replace(/[^a-zA-Z0-9_\-\s]/g, '');
+    if (raw) {
+      currentUser = raw.replace(/\s+/g, '_');
+    } else {
+      currentUser = 'default_user';
+    }
+    localStorage.setItem('dcs_audio_user', currentUser);
+    if (nameEl) nameEl.textContent = currentUser;
+    closeUserModal();
+  }
+
+  if (btnSelect) btnSelect.addEventListener('click', openUserModal);
+  if (userModalClose) userModalClose.addEventListener('click', closeUserModal);
+  if (btnSaveUser) btnSaveUser.addEventListener('click', saveUser);
+  if (inputUser) {
+    inputUser.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveUser();
+    });
+  }
+
+  // Prompt contributor on first visit
+  if (!localStorage.getItem('dcs_audio_user')) {
+    setTimeout(openUserModal, 600);
+  }
+}
 
 async function checkAuthStatus() {
   try {
@@ -92,16 +138,7 @@ async function checkAuthStatus() {
 
       if (btnReauth) {
         btnReauth.style.display = 'inline-flex';
-        if (!data.hasFullDriveScope) {
-          btnReauth.textContent = '⚠️ Reconnect to see prior files';
-          btnReauth.style.background = '#fef08a';
-          btnReauth.style.color = '#854d0e';
-          btnReauth.title = 'Current token has restricted permissions and cannot see files from prior deploys. Click to grant full Drive access.';
-        } else {
-          btnReauth.textContent = '🔄 Reconnect';
-          btnReauth.style.background = '';
-          btnReauth.style.color = '';
-        }
+        btnReauth.textContent = '🔄 Reconnect';
       }
     } else {
       if (btnAuthDrive) btnAuthDrive.style.display = 'inline-flex';
@@ -154,7 +191,6 @@ async function switchLanguage(lang) {
 
   await loadQuestions(currentLang);
 
-  // If modal was open, refresh with the question in the newly selected language
   if (openQId && !modal.hidden) {
     const updatedQ = allQuestions.find(x => x.id === openQId);
     if (updatedQ) {
@@ -165,17 +201,13 @@ async function switchLanguage(lang) {
   }
 }
 
-let totalDriveAudios = 0;
-
 // ── Data loading ───────────────────────────────────────────────────────────
 async function loadQuestions(lang = currentLang) {
   try {
     const res = await fetch(`/api/questions?lang=${encodeURIComponent(lang)}`);
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
-    allQuestions = data.questions;
-    totalDriveAudios = (data.stats && data.stats.totalDriveFiles) || 0;
-    updateStats();
+    allQuestions = data.questions || [];
     applyFilters();
   } catch (err) {
     grid.innerHTML = `<div class="empty-state">
@@ -185,37 +217,10 @@ async function loadQuestions(lang = currentLang) {
   }
 }
 
-function updateStats() {
-  const total = allQuestions.length;
-  const fullyRecorded = allQuestions.filter(q => q.hasAudio).length;
-  const partial = allQuestions.filter(q => q.hasPartial).length;
-  const missing = total - fullyRecorded - partial;
-
-  if (statTotal) statTotal.textContent = total;
-  if (statRecorded) statRecorded.textContent = fullyRecorded;
-  if (statMissing) statMissing.textContent = missing;
-
-  if (statPartial && chipPartial) {
-    statPartial.textContent = partial;
-    chipPartial.style.display = partial > 0 ? 'inline-flex' : 'none';
-  }
-
-  if (statDriveFiles && chipTotalAudios) {
-    statDriveFiles.textContent = totalDriveAudios;
-    chipTotalAudios.style.display = totalDriveAudios > 0 ? 'inline-flex' : 'none';
-  }
-
-  const percent = total > 0 ? Math.round((fullyRecorded / total) * 100) : 0;
-  const progressFill = document.getElementById('stats-progress-fill');
-  const progressText = document.getElementById('stats-progress-text');
-  if (progressFill) progressFill.style.width = `${percent}%`;
-  if (progressText) progressText.textContent = `${percent}% complete (${fullyRecorded}/${total})`;
-}
-
-// ── Grid rendering ─────────────────────────────────────────────────────────
+// ── Grid rendering (No biased markers shown to users) ──────────────────────
 function renderGrid(questions) {
   if (questions.length === 0) {
-    grid.innerHTML = '<div class="empty-state"><p>No questions match your filter.</p></div>';
+    grid.innerHTML = '<div class="empty-state"><p>No questions match your search.</p></div>';
     return;
   }
 
@@ -228,27 +233,15 @@ function renderGrid(questions) {
 function buildCard(q) {
   const card = document.createElement('div');
   const hasOpts = Array.isArray(q.options) && q.options.length > 0;
-
-  const cardStatus = q.hasAudio ? 'recorded' : (q.hasPartial ? 'partial' : 'missing');
-  card.className = `q-card ${cardStatus}`;
-  card.dataset.id = q.id;
-
-  let badgeLabel = 'No audio';
-  let badgeClass = 'missing';
-
-  if (q.hasAudio) {
-    badgeLabel = '✔ Fully Recorded';
-    badgeClass = 'recorded';
-  } else if (q.hasPartial) {
-    if (q.hasQuestionAudio) {
-      badgeLabel = '⏳ Partial (Prompt)';
-    } else {
-      badgeLabel = '⏳ Partial (Options)';
-    }
-    badgeClass = 'partial';
-  }
-
   const langLabel = currentLang.toUpperCase();
+
+  const sessionKeyQ = `${currentUser}_${q.id}_question_${currentLang}`;
+  const sessionKeyOpts = `${currentUser}_${q.id}_options_${currentLang}`;
+  const recordedQSession = sessionRecorded.has(sessionKeyQ);
+  const recordedOptsSession = sessionRecorded.has(sessionKeyOpts);
+
+  card.className = 'q-card';
+  card.dataset.id = q.id;
 
   card.innerHTML = `
     <div class="card-top">
@@ -256,22 +249,17 @@ function buildCard(q) {
         <span class="q-id">${q.id}</span>
         <span class="card-lang-tag">${langLabel}</span>
       </div>
-      <span class="q-badge ${badgeClass}">
-        ${badgeLabel}
-      </span>
+      ${(recordedQSession || recordedOptsSession) ? '<span class="q-badge" style="background:#dcfce7;color:#166534;">✔ Recorded in session</span>' : ''}
     </div>
     <p class="q-text">${q.text || '<em>No text available</em>'}</p>
     ${hasOpts ? `<div class="card-options-summary">📋 ${q.options.length} options available</div>` : ''}
 
     <div class="card-tracks">
       <div class="card-track-row">
-        <span class="track-title">🎙️ Question</span>
+        <span class="track-title">🎙️ Prompt</span>
         <div class="track-actions">
           <button class="btn-mini btn-mini-record" data-id="${q.id}" data-track="question">
-            ${q.hasQuestionAudio ? 'Re-record' : 'Record'}
-          </button>
-          <button class="btn-mini btn-mini-play" ${q.hasQuestionAudio ? `data-link="${q.questionDriveLink}"` : 'disabled'}>
-            ▶ Play
+            ${recordedQSession ? '🔄 Re-record' : '🎙️ Record'}
           </button>
         </div>
       </div>
@@ -281,10 +269,7 @@ function buildCard(q) {
         <span class="track-title">📋 Options</span>
         <div class="track-actions">
           <button class="btn-mini btn-mini-record" data-id="${q.id}" data-track="options">
-            ${q.hasOptionsAudio ? 'Re-record' : 'Record'}
-          </button>
-          <button class="btn-mini btn-mini-play" ${q.hasOptionsAudio ? `data-link="${q.optionsDriveLink}"` : 'disabled'}>
-            ▶ Play
+            ${recordedOptsSession ? '🔄 Re-record' : '🎙️ Record'}
           </button>
         </div>
       </div>
@@ -292,7 +277,6 @@ function buildCard(q) {
     </div>
   `;
 
-  // Attach record triggers
   card.querySelectorAll('.btn-mini-record').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -302,38 +286,21 @@ function buildCard(q) {
     });
   });
 
-  // Attach play triggers
-  card.querySelectorAll('.btn-mini-play').forEach(btn => {
-    if (!btn.disabled && btn.dataset.link) {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.open(btn.dataset.link, '_blank');
-      });
-    }
-  });
-
   return card;
 }
 
 // ── Toolbar bindings ───────────────────────────────────────────────────────
 function bindToolbar() {
-  searchInput.addEventListener('input', applyFilters);
-  filterSelect.addEventListener('change', applyFilters);
+  if (searchInput) searchInput.addEventListener('input', applyFilters);
 }
 
 function applyFilters() {
-  const query  = searchInput.value.trim().toLowerCase();
-  const filter = filterSelect.value;
+  const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
 
   const filtered = allQuestions.filter(q => {
-    if (filter === 'recorded' && !q.hasAudio) return false;
-    if (filter === 'partial'  && !q.hasPartial) return false;
-    if (filter === 'missing'  && (q.hasAudio || q.hasPartial)) return false;
-    if (query) {
-      return q.id.toLowerCase().includes(query) ||
-             (q.text && q.text.toLowerCase().includes(query));
-    }
-    return true;
+    if (!query) return true;
+    return q.id.toLowerCase().includes(query) ||
+           (q.text && q.text.toLowerCase().includes(query));
   });
 
   renderGrid(filtered);
@@ -373,19 +340,12 @@ function switchTrack(track) {
 
 function updateTrackBadges() {
   if (!currentQ) return;
-  const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length > 0;
+  const sessionKey = `${currentUser}_${currentQ.id}_${currentTrack}_${currentLang}`;
+  const isRecorded = sessionRecorded.has(sessionKey);
 
-  badgeQStatus.textContent = currentQ.hasQuestionAudio ? '✔' : 'Empty';
-  badgeQStatus.className = `track-badge ${currentQ.hasQuestionAudio ? 'done' : 'empty'}`;
-
-  if (hasOpts) {
-    badgeOptsStatus.textContent = currentQ.hasOptionsAudio ? '✔' : 'Empty';
-    badgeOptsStatus.className = `track-badge ${currentQ.hasOptionsAudio ? 'done' : 'empty'}`;
-  }
-
-  // Update replace warning for current track
-  const isReplacing = currentTrack === 'question' ? currentQ.hasQuestionAudio : currentQ.hasOptionsAudio;
-  replaceWarn.hidden = !isReplacing;
+  replaceWarn.hidden = !isRecorded;
+  if (badgeQStatus) badgeQStatus.textContent = '';
+  if (badgeOptsStatus) badgeOptsStatus.textContent = '';
 }
 
 // ── Modal open / close ─────────────────────────────────────────────────────
@@ -399,7 +359,6 @@ function openModal(q, preferredTrack = 'question') {
 
   const hasOpts = Array.isArray(q.options) && q.options.length > 0;
 
-  // Populate options list
   modalOptionsList.innerHTML = '';
   if (hasOpts) {
     trackSwitcher.style.display = 'flex';
@@ -413,7 +372,6 @@ function openModal(q, preferredTrack = 'question') {
     trackSwitcher.style.display = 'none';
   }
 
-  // Set track and switch view
   switchTrack(hasOpts && preferredTrack === 'options' ? 'options' : 'question');
 
   modal.hidden = false;
@@ -462,13 +420,31 @@ async function startRecording() {
     if (e.data.size > 0) audioChunks.push(e.data);
   });
 
-  mediaRecorder.addEventListener('stop', () => {
-    recordedBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
-    playbackAudio.src = URL.createObjectURL(recordedBlob);
-    btnPlay.disabled   = false;
-    btnUpload.disabled = false;
-    uploadStatus.textContent = '';
+  mediaRecorder.addEventListener('stop', async () => {
+    const rawBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+    uploadStatus.textContent = '⚡ Converting to MP3…';
     uploadStatus.className   = 'upload-status';
+
+    try {
+      if (typeof window.audioBlobToMp3 === 'function') {
+        recordedBlob = await window.audioBlobToMp3(rawBlob, 128);
+      } else {
+        recordedBlob = rawBlob;
+      }
+      playbackAudio.src = URL.createObjectURL(recordedBlob);
+      btnPlay.disabled   = false;
+      btnUpload.disabled = false;
+      uploadStatus.textContent = '🎵 Ready to upload (MP3 128kbps)';
+      uploadStatus.className   = 'upload-status';
+    } catch (err) {
+      console.warn('MP3 conversion fallback:', err);
+      recordedBlob = rawBlob;
+      playbackAudio.src = URL.createObjectURL(recordedBlob);
+      btnPlay.disabled   = false;
+      btnUpload.disabled = false;
+      uploadStatus.textContent = 'Ready to upload';
+      uploadStatus.className   = 'upload-status';
+    }
   });
 
   mediaRecorder.start(250);
@@ -524,12 +500,12 @@ function playBack() {
     btnPlay.innerHTML = '<span class="btn-icon">⏸</span> Pause';
   } else {
     playbackAudio.pause();
-    btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play';
+    btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play (MP3)';
   }
 }
 
 playbackAudio.addEventListener('ended', () => {
-  btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play';
+  btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play (MP3)';
 });
 
 // ── Upload ─────────────────────────────────────────────────────────────────
@@ -537,20 +513,18 @@ async function uploadAudio() {
   if (!recordedBlob || !currentQ) return;
 
   btnUpload.disabled = true;
-  uploadStatus.textContent = '⏳ Uploading…';
+  uploadStatus.textContent = '⏳ Uploading MP3 to folder…';
   uploadStatus.className   = 'upload-status';
 
   const formData = new FormData();
-  const ext      = blobExtension(recordedBlob.type);
   const suffix   = currentTrack === 'options' ? '_options' : '_question';
-
-  // Audio file qualified with ewe or akan extension
-  const audioFileName = `${currentQ.id}${suffix}_${currentLang}${ext}`;
+  const audioFileName = `${currentQ.id}${suffix}_${currentLang}.mp3`;
 
   formData.append('audio', recordedBlob, audioFileName);
   formData.append('questionId', currentQ.id);
   formData.append('targetType', currentTrack);
   formData.append('lang', currentLang);
+  formData.append('user', currentUser);
   formData.append('replace', 'true');
 
   try {
@@ -559,25 +533,14 @@ async function uploadAudio() {
 
     if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
 
-    uploadStatus.textContent = `✅ Uploaded as ${data.filename}`;
+    uploadStatus.textContent = `✅ Saved to ${currentUser}'s folder as ${data.filename}`;
     uploadStatus.className   = 'upload-status success';
 
-    if (currentTrack === 'question') {
-      currentQ.hasQuestionAudio = true;
-      currentQ.questionDriveLink = data.webViewLink;
-    } else {
-      currentQ.hasOptionsAudio = true;
-      currentQ.optionsDriveLink = data.webViewLink;
-    }
-
-    const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length > 0;
-    currentQ.hasAudio = hasOpts ? (currentQ.hasQuestionAudio && currentQ.hasOptionsAudio) : currentQ.hasQuestionAudio;
-    currentQ.hasPartial = !currentQ.hasAudio && (currentQ.hasQuestionAudio || currentQ.hasOptionsAudio);
-    totalDriveAudios++;
+    const sessionKey = `${currentUser}_${currentQ.id}_${currentTrack}_${currentLang}`;
+    sessionRecorded.add(sessionKey);
 
     updateTrackBadges();
     updateCardInGrid(currentQ);
-    updateStats();
 
   } catch (err) {
     uploadStatus.textContent = `❌ Upload failed: ${err.message}`;
@@ -633,16 +596,16 @@ function resetRecordingUI() {
   recordedBlob = null;
   audioChunks  = [];
   elapsedSeconds = 0;
-  timerEl.textContent    = '00:00';
-  btnRecord.disabled     = false;
+  timerEl.textContent      = '00:00';
+  btnRecord.disabled       = false;
   btnRecord.classList.remove('recording');
-  btnStop.disabled       = true;
-  btnPlay.disabled       = true;
-  btnUpload.disabled     = true;
-  btnPlay.innerHTML      = '<span class="btn-icon">▶</span> Play';
+  btnStop.disabled         = true;
+  btnPlay.disabled         = true;
+  btnUpload.disabled       = true;
+  btnPlay.innerHTML        = '<span class="btn-icon">▶</span> Play (MP3)';
   uploadStatus.textContent = '';
-  uploadStatus.className = 'upload-status';
-  playbackAudio.src      = '';
+  uploadStatus.className   = 'upload-status';
+  playbackAudio.src        = '';
   clearWaveform();
 }
 
@@ -654,14 +617,6 @@ function getSupportedMimeType() {
     'audio/mp4',
   ];
   return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
-}
-
-function blobExtension(mimeType) {
-  if (mimeType.includes('webm')) return '.webm';
-  if (mimeType.includes('ogg'))  return '.ogg';
-  if (mimeType.includes('mp4'))  return '.m4a';
-  if (mimeType.includes('wav'))  return '.wav';
-  return '.webm';
 }
 
 function updateCardInGrid(q) {

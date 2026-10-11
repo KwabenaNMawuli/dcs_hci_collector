@@ -889,7 +889,28 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
 // ---------------------------------------------------------------------------
 
 // Admin Authentication Middleware & Routes
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+function getExpectedAdminPassword() {
+  let pw = null;
+  // Read fresh from .env so password edits work immediately without requiring server restart
+  try {
+    const envPath = path.join(__dirname, '.env');
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const m = content.match(/^\s*ADMIN_PASSWORD\s*=\s*(.*)$/m);
+      if (m && m[1] !== undefined) {
+        pw = m[1].trim();
+      }
+    }
+  } catch (_) {}
+
+  if (!pw) {
+    pw = process.env.ADMIN_PASSWORD || 'admin123';
+  }
+
+  // Strip any accidental surrounding quotes (e.g. "admin123" or 'admin123')
+  return String(pw).trim().replace(/^["']|["']$/g, '');
+}
+
 const activeAdminTokens = new Set();
 
 function requireAdminAuth(req, res, next) {
@@ -904,8 +925,10 @@ function requireAdminAuth(req, res, next) {
 }
 
 app.post('/api/admin/login', (req, res) => {
-  const { password } = req.body || {};
-  if (password && password === ADMIN_PASSWORD) {
+  const submitted = String(req.body && req.body.password !== undefined ? req.body.password : '').trim();
+  const expected = getExpectedAdminPassword();
+
+  if (submitted && submitted === expected) {
     const token = crypto.randomBytes(32).toString('hex');
     activeAdminTokens.add(token);
     return res.json({ success: true, token });

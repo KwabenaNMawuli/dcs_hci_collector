@@ -109,7 +109,7 @@ async function checkAdminSession() {
 function bindEvents() {
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const password = inputPassword.value;
+    const password = (inputPassword.value || '').trim();
     if (!password) return;
 
     btnLogin.disabled = true;

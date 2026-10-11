@@ -70,6 +70,39 @@ function getAdminHeaders() {
   };
 }
 
+async function safeFetchJson(url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (netErr) {
+    throw new Error(`Network error: ${netErr.message || 'Could not connect to server'}`);
+  }
+
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  // If response is not JSON (e.g., Express 404 HTML page, 502 Bad Gateway proxy, etc.)
+  if (!contentType.includes('application/json')) {
+    if (res.status === 404) {
+      throw new Error(
+        'Server endpoint not found (404). If you just updated the app, please restart the server (or redeploy) so the latest admin routes take effect.'
+      );
+    }
+    if (res.status === 502 || res.status === 503) {
+      throw new Error(`Server temporarily unavailable (${res.status}). The service might be starting up.`);
+    }
+    throw new Error(`Server returned status ${res.status} (non-JSON response). Please verify the server is running.`);
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    throw new Error('Failed to parse server response as JSON.');
+  }
+
+  return { res, data };
+}
+
 function showAuthWall() {
   authWall.hidden = false;
   loginError.hidden = true;
@@ -90,11 +123,10 @@ async function checkAdminSession() {
   }
 
   try {
-    const res = await fetch('/api/admin/verify', {
+    const { data } = await safeFetchJson('/api/admin/verify', {
       headers: getAdminHeaders(),
     });
-    const data = await res.json();
-    if (data.authenticated) {
+    if (data && data.authenticated) {
       hideAuthWall();
       await loadAdminData();
     } else {
@@ -117,15 +149,14 @@ function bindEvents() {
     loginError.hidden = true;
 
     try {
-      const res = await fetch('/api/admin/login', {
+      const { res, data } = await safeFetchJson('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-      const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Incorrect password');
+        throw new Error((data && data.error) || 'Incorrect password');
       }
 
       sessionStorage.setItem('dcs_admin_token', data.token);
@@ -188,9 +219,8 @@ function bindEvents() {
 
 async function checkAuthStatus() {
   try {
-    const res = await fetch('/api/auth-status');
-    const data = await res.json();
-    if (data.authenticated) {
+    const { data } = await safeFetchJson('/api/auth-status');
+    if (data && data.authenticated) {
       if (badgeDrive) badgeDrive.style.display = 'inline-flex';
       if (btnAuthDrive) btnAuthDrive.style.display = 'none';
     } else {
@@ -209,7 +239,7 @@ async function loadAdminData() {
 
   try {
     // 1. Load overview stats
-    const overviewRes = await fetch('/api/admin/overview', {
+    const { res: overviewRes, data: ovData } = await safeFetchJson('/api/admin/overview', {
       headers: getAdminHeaders(),
     });
 
@@ -218,15 +248,15 @@ async function loadAdminData() {
       return;
     }
 
-    if (!overviewRes.ok) throw new Error('Failed to load overview data');
-    overviewData = await overviewRes.json();
+    if (!overviewRes.ok) throw new Error((ovData && ovData.error) || 'Failed to load overview data');
+    overviewData = ovData;
 
     renderKPIs(overviewData);
     renderUsersTable(overviewData.users || []);
     populateUserFilter(overviewData.userList || []);
 
     // 2. Load recordings list
-    const recordingsRes = await fetch('/api/admin/recordings?practice=true', {
+    const { res: recordingsRes, data: recData } = await safeFetchJson('/api/admin/recordings?practice=true', {
       headers: getAdminHeaders(),
     });
 
@@ -235,14 +265,14 @@ async function loadAdminData() {
       return;
     }
 
-    if (!recordingsRes.ok) throw new Error('Failed to load recordings list');
-    const recData = await recordingsRes.json();
-    allRecordings = recData.recordings || [];
+    if (!recordingsRes.ok) throw new Error((recData && recData.error) || 'Failed to load recordings list');
+    allRecordings = (recData && recData.recordings) || [];
 
     filterAndRenderRecordings();
 
   } catch (err) {
     console.error('Error loading admin data:', err);
+    alert('Error loading admin data: ' + err.message);
   } finally {
     btnRefresh.disabled = false;
     btnRefresh.textContent = '🔄 Refresh Data';
@@ -402,13 +432,12 @@ function filterAndRenderRecordings() {
       btn.textContent = '⏳ Deleting…';
 
       try {
-        const delRes = await fetch('/api/admin/recording', {
+        const { res: delRes, data: delData } = await safeFetchJson('/api/admin/recording', {
           method: 'DELETE',
           headers: getAdminHeaders(),
           body: JSON.stringify({ user: u, filename: fn, fileId: fid }),
         });
-        const delData = await delRes.json();
-        if (!delRes.ok) throw new Error(delData.error || 'Delete failed');
+        if (!delRes.ok) throw new Error((delData && delData.error) || 'Delete failed');
 
         allRecordings = allRecordings.filter(x => !(x.name === fn && x.user === u));
         filterAndRenderRecordings();
@@ -446,13 +475,12 @@ async function handleRenameSubmit() {
   btnConfirmRename.textContent = '⏳ Renaming…';
 
   try {
-    const res = await fetch('/api/admin/rename-user', {
+    const { res, data } = await safeFetchJson('/api/admin/rename-user', {
       method: 'POST',
       headers: getAdminHeaders(),
       body: JSON.stringify({ oldUser, newUser }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Rename failed');
+    if (!res.ok) throw new Error((data && data.error) || 'Rename failed');
 
     closeRenameModal();
     await loadAdminData();

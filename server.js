@@ -12,6 +12,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Readable } = require('stream');
 const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
@@ -414,70 +415,281 @@ app.get('/api/auth-status', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// API Routes
+// User Drive Folder & Audio Helpers
 // ---------------------------------------------------------------------------
+const userDriveFolderCache = new Map();
+
+function sanitizeUsername(rawUser) {
+  if (!rawUser || typeof rawUser !== 'string') return 'default_user';
+  const clean = rawUser.trim().replace(/[^a-zA-Z0-9_\-]/g, '_');
+  return clean || 'default_user';
+}
+
+async function getUserDriveFolder(drive, parentId, user) {
+  const normUser = sanitizeUsername(user);
+  const folderName = `User_${normUser}`;
+  const cacheKey = `${parentId}_${normUser.toLowerCase()}`;
+  if (userDriveFolderCache.has(cacheKey)) {
+    return userDriveFolderCache.get(cacheKey);
+  }
+
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id, name)',
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  if (res.data.files && res.data.files.length > 0) {
+    const id = res.data.files[0].id;
+    userDriveFolderCache.set(cacheKey, id);
+    return id;
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      parents: [parentId],
+      mimeType: 'application/vnd.google-apps.folder',
+    },
+    fields: 'id, name',
+    supportsAllDrives: true,
+  });
+
+  const newId = created.data.id;
+  userDriveFolderCache.set(cacheKey, newId);
+  return newId;
+}
+
+async function getUserPracticeDriveFolder(drive, userFolderId) {
+  const cacheKey = `practice_${userFolderId}`;
+  if (userDriveFolderCache.has(cacheKey)) {
+    return userDriveFolderCache.get(cacheKey);
+  }
+
+  const res = await drive.files.list({
+    q: `'${userFolderId}' in parents and name = 'practice' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id, name)',
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  if (res.data.files && res.data.files.length > 0) {
+    const id = res.data.files[0].id;
+    userDriveFolderCache.set(cacheKey, id);
+    return id;
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: 'practice',
+      parents: [userFolderId],
+      mimeType: 'application/vnd.google-apps.folder',
+    },
+    fields: 'id, name',
+    supportsAllDrives: true,
+  });
+
+  const newId = created.data.id;
+  userDriveFolderCache.set(cacheKey, newId);
+  return newId;
+}
+
+function parseAudioFilename(filename, defaultUser) {
+  const isOptions = filename.includes('_options') || filename.includes('_opts');
+  const isPractice = filename.startsWith('practice_');
+  let lang = 'akan';
+  if (filename.toLowerCase().includes('_ewe')) lang = 'ewe';
+  else if (filename.toLowerCase().includes('_akan')) lang = 'akan';
+
+  let questionId = 'Unknown';
+  if (isPractice) {
+    const parts = filename.split('_');
+    if (parts.length >= 2) questionId = parts[1];
+  } else {
+    const m = filename.match(/^([A-Za-z0-9]+)/);
+    if (m) questionId = m[1];
+  }
+
+  return {
+    questionId,
+    targetType: isPractice ? 'practice' : (isOptions ? 'options' : 'question'),
+    lang,
+    isPractice,
+  };
+}
+
+async function listAllRecordings() {
+  const recordings = [];
+  const usersSet = new Set();
+  const drive = (() => {
+    try { return getDriveClient(); } catch (_) { return null; }
+  })();
+  const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
+
+  // 1. Scan Google Drive if connected
+  if (drive && cleanFolderId) {
+    try {
+      const rootRes = await drive.files.list({
+        q: `'${cleanFolderId}' in parents and trashed = false`,
+        fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
+        pageSize: 1000,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      const rootItems = rootRes.data.files || [];
+      const userFolders = rootItems.filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.name.startsWith('User_'));
+      const legacyFiles = rootItems.filter(f => f.mimeType !== 'application/vnd.google-apps.folder' && EXTS.some(ext => f.name.toLowerCase().endsWith(ext)));
+
+      for (const lf of legacyFiles) {
+        const meta = parseAudioFilename(lf.name, 'default_user');
+        usersSet.add('default_user');
+        recordings.push({
+          fileId: lf.id,
+          name: lf.name,
+          user: 'default_user',
+          questionId: meta.questionId,
+          targetType: meta.targetType,
+          lang: meta.lang,
+          size: lf.size ? parseInt(lf.size, 10) : 0,
+          createdTime: lf.createdTime || null,
+          webViewLink: lf.webViewLink,
+          isLocal: false,
+          isPractice: meta.isPractice,
+        });
+      }
+
+      for (const uf of userFolders) {
+        const username = uf.name.replace(/^User_/, '');
+        usersSet.add(username);
+
+        const uRes = await drive.files.list({
+          q: `'${uf.id}' in parents and trashed = false`,
+          fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
+          pageSize: 1000,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+
+        const userFiles = (uRes.data.files || []).filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+        for (const file of userFiles) {
+          const meta = parseAudioFilename(file.name, username);
+          recordings.push({
+            fileId: file.id,
+            name: file.name,
+            user: username,
+            userFolderId: uf.id,
+            questionId: meta.questionId,
+            targetType: meta.targetType,
+            lang: meta.lang,
+            size: file.size ? parseInt(file.size, 10) : 0,
+            createdTime: file.createdTime || null,
+            webViewLink: file.webViewLink,
+            isLocal: false,
+            isPractice: meta.isPractice,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Error listing Drive recordings for admin:', err.message);
+    }
+  }
+
+  // 2. Scan local uploads directory
+  if (fs.existsSync(UPLOADS_DIR)) {
+    try {
+      const entries = fs.readdirSync(UPLOADS_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          if (entry.name === 'practice') continue;
+          const username = entry.name;
+          usersSet.add(username);
+          const userDir = path.join(UPLOADS_DIR, username);
+          const uFiles = fs.readdirSync(userDir, { withFileTypes: true });
+          for (const uf of uFiles) {
+            if (uf.isFile() && EXTS.some(ext => uf.name.toLowerCase().endsWith(ext))) {
+              const fullPath = path.join(userDir, uf.name);
+              const stat = fs.statSync(fullPath);
+              const meta = parseAudioFilename(uf.name, username);
+
+              const already = recordings.find(r => r.name.toLowerCase() === uf.name.toLowerCase() && r.user === username);
+              if (already) {
+                already.isLocal = true;
+                already.localPath = fullPath;
+              } else {
+                recordings.push({
+                  fileId: `local-${username}-${uf.name}`,
+                  name: uf.name,
+                  user: username,
+                  questionId: meta.questionId,
+                  targetType: meta.targetType,
+                  lang: meta.lang,
+                  size: stat.size,
+                  createdTime: stat.mtime.toISOString(),
+                  webViewLink: null,
+                  isLocal: true,
+                  localPath: fullPath,
+                  isPractice: meta.isPractice,
+                });
+              }
+            }
+          }
+        } else if (entry.isFile() && EXTS.some(ext => entry.name.toLowerCase().endsWith(ext))) {
+          const fullPath = path.join(UPLOADS_DIR, entry.name);
+          const stat = fs.statSync(fullPath);
+          const meta = parseAudioFilename(entry.name, 'default_user');
+          usersSet.add('default_user');
+          const already = recordings.find(r => r.name.toLowerCase() === entry.name.toLowerCase() && r.user === 'default_user');
+          if (already) {
+            already.isLocal = true;
+            already.localPath = fullPath;
+          } else {
+            recordings.push({
+              fileId: `local-${entry.name}`,
+              name: entry.name,
+              user: 'default_user',
+              questionId: meta.questionId,
+              targetType: meta.targetType,
+              lang: meta.lang,
+              size: stat.size,
+              createdTime: stat.mtime.toISOString(),
+              webViewLink: null,
+              isLocal: true,
+              localPath: fullPath,
+              isPractice: meta.isPractice,
+            });
+          }
+        }
+      }
+    } catch (localErr) {
+      console.warn('Error reading local uploads for admin:', localErr.message);
+    }
+  }
+
+  for (const r of recordings) {
+    r.streamUrl = `/api/audio/${encodeURIComponent(r.user)}/${encodeURIComponent(r.name)}${r.fileId && !r.fileId.startsWith('local-') ? `?fileId=${encodeURIComponent(r.fileId)}` : ''}`;
+  }
+
+  return { recordings, users: Array.from(usersSet).sort() };
+}
+
+// ---------------------------------------------------------------------------
+// Standard API Routes
+// ---------------------------------------------------------------------------
+
+// Public questions list for collectors (clean, fast, no biased markers)
 app.get('/api/questions', async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const questions = await getQuestions(lang);
 
-    let filesMap = new Map();
-    try {
-      filesMap = await listDriveFiles();
-    } catch (driveErr) {
-      // Drive might not be connected yet
-    }
-
-    let fullyRecordedCount = 0;
-    let partialCount = 0;
-    let unrecordedCount = 0;
-
-    const enriched = questions.map((q) => {
-      const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
-      const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
-
-      const qFile = findDriveFile(filesMap, qPrefixes);
-      const optsFile = findDriveFile(filesMap, optsPrefixes);
-
-      const hasOptions = Array.isArray(q.options) && q.options.length > 0;
-      const hasQuestionAudio = !!qFile;
-      const hasOptionsAudio = !!optsFile;
-
-      // Fully recorded: if has options, both needed; if no options, question needed
-      const isComplete = hasOptions ? (hasQuestionAudio && hasOptionsAudio) : hasQuestionAudio;
-      // Partial: has at least one recorded track but not complete
-      const isPartial = !isComplete && (hasQuestionAudio || hasOptionsAudio);
-
-      if (isComplete) {
-        fullyRecordedCount++;
-      } else if (isPartial) {
-        partialCount++;
-      } else {
-        unrecordedCount++;
-      }
-
-      return {
-        ...q,
-        lang,
-        hasQuestionAudio,
-        questionDriveLink: qFile ? qFile.webViewLink : null,
-        hasOptionsAudio,
-        optionsDriveLink: optsFile ? optsFile.webViewLink : null,
-        hasPartial: isPartial,
-        hasAudio: isComplete,
-      };
-    });
-
     res.json({
       lang,
-      questions: enriched,
-      stats: {
-        total: questions.length,
-        recorded: fullyRecordedCount,
-        partial: partialCount,
-        missing: unrecordedCount,
-        totalDriveFiles: filesMap.size,
-      },
+      questions,
+      total: questions.length,
     });
   } catch (err) {
     console.error('GET /api/questions error:', err);
@@ -485,8 +697,7 @@ app.get('/api/questions', async (req, res) => {
   }
 });
 
-// Warm-up practice set: a spread of questions across the questionnaire, no Drive involved.
-// Pass ?ids=C1,P2,... to get the same questions in another language.
+// Warm-up practice set: a spread of questions across the questionnaire
 app.get('/api/practice', async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
@@ -498,7 +709,6 @@ app.get('/api/practice', async (req, res) => {
       const wanted = String(req.query.ids).split(',');
       picked = wanted.map((id) => all.find((q) => q.id === id)).filter(Boolean);
     } else {
-      // one random question from each of `count` equal slices, so the set spans the whole form
       picked = [];
       const size = all.length / Math.min(count, all.length);
       for (let i = 0; i < Math.min(count, all.length); i++) {
@@ -515,11 +725,11 @@ app.get('/api/practice', async (req, res) => {
   }
 });
 
-app.post('/api/upload',upload.single('audio'), async (req, res) => {
+// Main upload route — saves in per-user folder as MP3
+app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
-    const { questionId, targetType, lang, replace } = req.body;
-    // targetType: 'question' | 'options'
-    // lang: 'akan' | 'ewe'
+    const { questionId, targetType, lang, replace, user } = req.body;
+    const normUser = sanitizeUsername(user);
 
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
@@ -531,23 +741,22 @@ app.post('/api/upload',upload.single('audio'), async (req, res) => {
     const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const typeSuffix = targetType === 'options' ? '_options' : '_question';
 
-    const mimeToExt = {
-      'audio/webm': '.webm',
-      'audio/mp4': '.m4a',
-      'audio/mpeg': '.mp3',
-      'audio/wav': '.wav',
-      'audio/ogg': '.ogg',
-      'audio/x-m4a': '.m4a',
-    };
-    const ext = mimeToExt[req.file.mimetype] || '.webm';
-    // Audio file qualified with ewe or akan
+    // MP3 is standard format; fallback to original extension if needed
+    const ext = (req.file.mimetype.includes('mpeg') || req.file.mimetype.includes('mp3'))
+      ? '.mp3'
+      : (path.extname(req.file.originalname || '') || '.mp3');
+
     const filename = `${questionId}${typeSuffix}_${normLang}${ext}`;
 
-    // 1. Save local backup
-    const localPath = path.join(UPLOADS_DIR, filename);
+    // 1. Save local backup in user folder
+    const userDir = path.join(UPLOADS_DIR, normUser);
+    if (!fs.existsSync(userDir)) {
+      fs.mkdirSync(userDir, { recursive: true });
+    }
+    const localPath = path.join(userDir, filename);
     fs.writeFileSync(localPath, req.file.buffer);
 
-    // 2. Upload to Google Drive
+    // 2. Upload to Google Drive inside user's designated folder
     const drive = getDriveClient();
     const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
 
@@ -555,17 +764,30 @@ app.post('/api/upload',upload.single('audio'), async (req, res) => {
       return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
     }
 
-    // If replace=true, delete old file matching this target and language
+    const userFolderId = await getUserDriveFolder(drive, cleanFolderId, normUser);
+
+    // If replace=true, delete old file matching this question/track in this user's folder
     if (replace === 'true') {
       try {
-        const existingMap = await listDriveFiles();
         const prefixes = getAudioPrefixes(questionId, targetType, normLang);
-        const existing = findDriveFile(existingMap, prefixes);
-        if (existing) {
-          await drive.files.delete({ fileId: existing.fileId });
+        const existingInUserFolder = await drive.files.list({
+          q: `'${userFolderId}' in parents and trashed = false`,
+          fields: 'files(id, name)',
+          pageSize: 100,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+
+        if (existingInUserFolder.data.files) {
+          for (const f of existingInUserFolder.data.files) {
+            const fn = f.name.toLowerCase();
+            if (prefixes.some(p => fn.startsWith(p.toLowerCase()))) {
+              await drive.files.delete({ fileId: f.id, supportsAllDrives: true });
+            }
+          }
         }
       } catch (delErr) {
-        console.warn('Could not delete old file:', delErr.message);
+        console.warn('Could not delete old file in user folder:', delErr.message);
       }
     }
 
@@ -576,20 +798,22 @@ app.post('/api/upload',upload.single('audio'), async (req, res) => {
     const driveRes = await drive.files.create({
       requestBody: {
         name: filename,
-        parents: [cleanFolderId],
-        mimeType: req.file.mimetype,
+        parents: [userFolderId],
+        mimeType: req.file.mimetype || 'audio/mpeg',
       },
       media: {
-        mimeType: req.file.mimetype,
+        mimeType: req.file.mimetype || 'audio/mpeg',
         body: bufferStream,
       },
       fields: 'id, name, webViewLink',
+      supportsAllDrives: true,
     });
 
     res.json({
       success: true,
       fileId: driveRes.data.id,
       filename: driveRes.data.name,
+      user: normUser,
       lang: normLang,
       targetType: targetType || 'question',
       webViewLink: driveRes.data.webViewLink,
@@ -600,36 +824,12 @@ app.post('/api/upload',upload.single('audio'), async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Practice takes — kept in a separate "practice" sub-folder (local and Drive) so they
-// can never be mistaken for, or overwrite, real recordings.
-// ---------------------------------------------------------------------------
-const PRACTICE_DIR = path.join(UPLOADS_DIR, 'practice');
-let practiceDriveFolderId = null;
-
-async function getPracticeDriveFolder(drive, parentId) {
-  if (practiceDriveFolderId) return practiceDriveFolderId;
-
-  const found = await drive.files.list({
-    q: `'${parentId}' in parents and name = 'practice' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-    fields: 'files(id)',
-    pageSize: 1,
-  });
-  if (found.data.files.length) {
-    practiceDriveFolderId = found.data.files[0].id;
-  } else {
-    const created = await drive.files.create({
-      requestBody: { name: 'practice', parents: [parentId], mimeType: 'application/vnd.google-apps.folder' },
-      fields: 'id',
-    });
-    practiceDriveFolderId = created.data.id;
-  }
-  return practiceDriveFolderId;
-}
-
+// Practice upload route — saved in user's practice subfolder
 app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
   try {
-    const { questionId, lang } = req.body;
+    const { questionId, lang, user } = req.body;
+    const normUser = sanitizeUsername(user);
+
     if (!questionId || !/^[A-Za-z0-9]+$/.test(questionId)) {
       return res.status(400).json({ error: 'A valid questionId is required' });
     }
@@ -638,72 +838,332 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
     }
 
     const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
-    const ext = path.extname(req.file.originalname || '') || '.webm';
+    const ext = (req.file.mimetype.includes('mpeg') || req.file.mimetype.includes('mp3'))
+      ? '.mp3'
+      : (path.extname(req.file.originalname || '') || '.mp3');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `practice_${questionId}_${normLang}_${stamp}${ext}`;
 
-    fs.mkdirSync(PRACTICE_DIR, { recursive: true });
-    fs.writeFileSync(path.join(PRACTICE_DIR, filename), req.file.buffer);
+    // 1. Save local backup in user's practice folder
+    const userPracticeDir = path.join(UPLOADS_DIR, normUser, 'practice');
+    fs.mkdirSync(userPracticeDir, { recursive: true });
+    fs.writeFileSync(path.join(userPracticeDir, filename), req.file.buffer);
 
+    // 2. Upload to Drive inside user's practice folder
     const parentId = (DRIVE_FOLDER_ID || '').trim();
     if (!parentId) {
       return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
     }
 
     const drive = getDriveClient();
-    const folderId = await getPracticeDriveFolder(drive, parentId);
+    const userFolderId = await getUserDriveFolder(drive, parentId, normUser);
+    const practiceFolderId = await getUserPracticeDriveFolder(drive, userFolderId);
 
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
     const driveRes = await drive.files.create({
-      requestBody: { name: filename, parents: [folderId], mimeType: req.file.mimetype },
-      media: { mimeType: req.file.mimetype, body: bufferStream },
+      requestBody: {
+        name: filename,
+        parents: [practiceFolderId],
+        mimeType: req.file.mimetype || 'audio/mpeg',
+      },
+      media: {
+        mimeType: req.file.mimetype || 'audio/mpeg',
+        body: bufferStream,
+      },
       fields: 'id, name',
+      supportsAllDrives: true,
     });
 
-    res.json({ success: true, filename: driveRes.data.name });
+    res.json({ success: true, filename: driveRes.data.name, user: normUser });
   } catch (err) {
     console.error('POST /api/practice-upload error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ---------------------------------------------------------------------------
+// Audio Streaming & Admin Routes
+// ---------------------------------------------------------------------------
+
+// Admin Authentication Middleware & Routes
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const activeAdminTokens = new Set();
+
+function requireAdminAuth(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const customToken = req.headers['x-admin-token'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim() || customToken.trim() || ((req.query && req.query.admin_token) ? String(req.query.admin_token).trim() : '');
+
+  if (token && activeAdminTokens.has(token)) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+}
+
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body || {};
+  if (password && password === ADMIN_PASSWORD) {
+    const token = crypto.randomBytes(32).toString('hex');
+    activeAdminTokens.add(token);
+    return res.json({ success: true, token });
+  }
+  return res.status(401).json({ error: 'Incorrect admin password' });
+});
+
+app.get('/api/admin/verify', (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  const customToken = req.headers['x-admin-token'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim() || customToken.trim() || ((req.query && req.query.admin_token) ? String(req.query.admin_token).trim() : '');
+  if (token && activeAdminTokens.has(token)) {
+    return res.json({ authenticated: true });
+  }
+  return res.json({ authenticated: false });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  const customToken = req.headers['x-admin-token'] || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim() || customToken.trim() || ((req.query && req.query.admin_token) ? String(req.query.admin_token).trim() : '');
+  if (token) {
+    activeAdminTokens.delete(token);
+  }
+  return res.json({ success: true });
+});
+
+// Direct audio streaming for browser playback (local or Drive)
+app.get('/api/audio/:user/:filename', async (req, res) => {
+  try {
+    const { user, filename } = req.params;
+    const normUser = sanitizeUsername(user);
+    const fileId = req.query.fileId;
+
+    const userPath = path.join(UPLOADS_DIR, normUser, filename);
+    const rootPath = path.join(UPLOADS_DIR, filename);
+
+    const mime = filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/webm';
+
+    if (fs.existsSync(userPath)) {
+      res.setHeader('Content-Type', mime);
+      return res.sendFile(userPath);
+    }
+    if (fs.existsSync(rootPath)) {
+      res.setHeader('Content-Type', mime);
+      return res.sendFile(rootPath);
+    }
+
+    if (fileId && !fileId.startsWith('local-')) {
+      const drive = getDriveClient();
+      res.setHeader('Content-Type', mime);
+      const streamRes = await drive.files.get(
+        { fileId, alt: 'media', supportsAllDrives: true },
+        { responseType: 'stream' }
+      );
+      return streamRes.data.pipe(res);
+    }
+
+    res.status(404).send('Audio file not found');
+  } catch (err) {
+    console.error('Audio stream error:', err.message);
+    res.status(500).send(`Audio playback error: ${err.message}`);
+  }
+});
+
+// Admin Overview: Statistics moved here, breakdown by user and language (Protected)
+app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
+  try {
+    let akanQuestions = [];
+    let eweQuestions = [];
+    try { akanQuestions = await getQuestions('akan'); } catch (_) {}
+    try { eweQuestions = await getQuestions('ewe'); } catch (_) {}
+
+    const { recordings, users } = await listAllRecordings();
+
+    // Calculate per-user stats
+    const userStats = users.map((u) => {
+      const uRecs = recordings.filter((r) => r.user === u && !r.isPractice);
+      const uAkan = uRecs.filter((r) => r.lang === 'akan');
+      const uEwe = uRecs.filter((r) => r.lang === 'ewe');
+      const qTracks = uRecs.filter((r) => r.targetType === 'question').length;
+      const optTracks = uRecs.filter((r) => r.targetType === 'options').length;
+
+      return {
+        user: u,
+        totalRecordings: uRecs.length,
+        akanCount: uAkan.length,
+        eweCount: uEwe.length,
+        questionTracks: qTracks,
+        optionsTracks: optTracks,
+        lastActive: uRecs.length > 0 ? uRecs[uRecs.length - 1].createdTime : null,
+      };
+    });
+
+    const nonPracticeRecs = recordings.filter(r => !r.isPractice);
+
+    res.json({
+      questionnaire: {
+        akanTotal: akanQuestions.length,
+        eweTotal: eweQuestions.length,
+      },
+      totalRecordings: nonPracticeRecs.length,
+      totalPracticeRecordings: recordings.length - nonPracticeRecs.length,
+      users: userStats,
+      userList: users,
+    });
+  } catch (err) {
+    console.error('GET /api/admin/overview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Recordings List: Filterable by user, language, track, and search (Protected)
+app.get('/api/admin/recordings', requireAdminAuth, async (req, res) => {
+  try {
+    const { user, lang, track, search, practice } = req.query;
+    const { recordings } = await listAllRecordings();
+
+    let filtered = recordings;
+
+    if (user && user !== 'all') {
+      filtered = filtered.filter(r => r.user.toLowerCase() === user.toLowerCase());
+    }
+    if (lang && lang !== 'all') {
+      filtered = filtered.filter(r => r.lang.toLowerCase() === lang.toLowerCase());
+    }
+    if (track && track !== 'all') {
+      filtered = filtered.filter(r => r.targetType.toLowerCase() === track.toLowerCase());
+    }
+    if (practice !== 'true') {
+      // By default hide practice takes unless explicitly asked
+      filtered = filtered.filter(r => !r.isPractice);
+    }
+    if (search) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(r =>
+        r.name.toLowerCase().includes(q) ||
+        r.questionId.toLowerCase().includes(q) ||
+        r.user.toLowerCase().includes(q)
+      );
+    }
+
+    res.json({
+      total: filtered.length,
+      recordings: filtered,
+    });
+  } catch (err) {
+    console.error('GET /api/admin/recordings error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Delete Recording (Protected)
+app.delete('/api/admin/recording', requireAdminAuth, async (req, res) => {
+  try {
+    const { user, filename, fileId } = req.body;
+    const normUser = sanitizeUsername(user);
+
+    let deletedFromDrive = false;
+    let deletedFromDisk = false;
+
+    if (fileId && !fileId.startsWith('local-')) {
+      try {
+        const drive = getDriveClient();
+        await drive.files.delete({ fileId, supportsAllDrives: true });
+        deletedFromDrive = true;
+      } catch (dErr) {
+        console.warn('Drive delete warning:', dErr.message);
+      }
+    }
+
+    if (filename) {
+      const userPath = path.join(UPLOADS_DIR, normUser, filename);
+      const rootPath = path.join(UPLOADS_DIR, filename);
+      if (fs.existsSync(userPath)) {
+        fs.unlinkSync(userPath);
+        deletedFromDisk = true;
+      } else if (fs.existsSync(rootPath)) {
+        fs.unlinkSync(rootPath);
+        deletedFromDisk = true;
+      }
+    }
+
+    res.json({ success: true, deletedFromDrive, deletedFromDisk, filename });
+  } catch (err) {
+    console.error('DELETE /api/admin/recording error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Rename User (Protected)
+app.post('/api/admin/rename-user', requireAdminAuth, async (req, res) => {
+  try {
+    const { oldUser, newUser } = req.body;
+    const normOld = sanitizeUsername(oldUser);
+    const normNew = sanitizeUsername(newUser);
+
+    if (normOld === normNew) {
+      return res.status(400).json({ error: 'New username must be different' });
+    }
+
+    // Rename local directory
+    const oldDir = path.join(UPLOADS_DIR, normOld);
+    const newDir = path.join(UPLOADS_DIR, normNew);
+    if (fs.existsSync(oldDir)) {
+      if (!fs.existsSync(newDir)) {
+        fs.renameSync(oldDir, newDir);
+      } else {
+        const files = fs.readdirSync(oldDir);
+        for (const f of files) {
+          fs.renameSync(path.join(oldDir, f), path.join(newDir, f));
+        }
+        try { fs.rmdirSync(oldDir); } catch (_) {}
+      }
+    }
+
+    // Rename Google Drive folder
+    try {
+      const drive = getDriveClient();
+      const parentId = (DRIVE_FOLDER_ID || '').trim();
+      const oldFolderName = `User_${normOld}`;
+      const newFolderName = `User_${normNew}`;
+
+      const resList = await drive.files.list({
+        q: `'${parentId}' in parents and name = '${oldFolderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id, name)',
+        pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      if (resList.data.files && resList.data.files.length > 0) {
+        await drive.files.update({
+          fileId: resList.data.files[0].id,
+          requestBody: { name: newFolderName },
+          supportsAllDrives: true,
+        });
+        userDriveFolderCache.clear();
+      }
+    } catch (dErr) {
+      console.warn('Drive rename warning:', dErr.message);
+    }
+
+    res.json({ success: true, oldUser: normOld, newUser: normNew });
+  } catch (err) {
+    console.error('POST /api/admin/rename-user error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Legacy status endpoint redirecting to overview summary
 app.get('/api/status', async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const questions = await getQuestions(lang);
-    let filesMap = new Map();
-    try {
-      filesMap = await listDriveFiles();
-    } catch (_) {}
-
-    let fullyRecorded = 0;
-    let partial = 0;
-    for (const q of questions) {
-      const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
-      const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
-
-      const qFile = findDriveFile(filesMap, qPrefixes);
-      const optsFile = findDriveFile(filesMap, optsPrefixes);
-      const hasOptions = Array.isArray(q.options) && q.options.length > 0;
-
-      const complete = hasOptions ? (!!qFile && !!optsFile) : !!qFile;
-      if (complete) {
-        fullyRecorded++;
-      } else if (qFile || optsFile) {
-        partial++;
-      }
-    }
-
     res.json({
       lang,
       total: questions.length,
-      recorded: fullyRecorded,
-      partial,
-      missing: questions.length - fullyRecorded - partial,
-      totalDriveFiles: filesMap.size,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -725,3 +1185,4 @@ app.listen(PORT, async () => {
     console.warn(`⚠️  Could not parse Ewe questionnaire: ${err.message}`);
   }
 });
+

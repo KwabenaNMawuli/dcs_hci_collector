@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard — DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+
+  <!-- ── Admin Authentication Wall ─────────────────────────────── -->
+  <div id="admin-auth-wall" class="auth-wall-overlay">
+    <div class="auth-wall-card">
+      <div class="auth-wall-icon">🔒</div>
+      <h2>Admin Access Restricted</h2>
+      <p class="auth-wall-sub">Please enter the administrator passcode to unlock the management portal and view statistics.</p>
+      
+      <form id="admin-login-form">
+        <div class="auth-input-group">
+          <input
+            type="password"
+            id="admin-password-input"
+            placeholder="Enter admin password…"
+            required
+            autocomplete="current-password"
+          />
+          <button type="submit" id="btn-admin-login" class="btn btn-record">
+            Unlock 🔓
+          </button>
+        </div>
+        <div id="admin-login-error" class="login-error-msg" hidden></div>
+      </form>
+
+      <div class="auth-wall-footer">
+        <a href="/" class="auth-wall-back">← Return to Questionnaire</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Top Header ──────────────────────────────────────────────── -->
+  <header class="app-header admin-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="mic-icon">🛡️</span>
+        <div class="header-title-group">
+          <h1>Admin Dashboard</h1>
+          <p class="header-subtitle">DCS HCI Audio Collector — Statistics & Management</p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <button type="button" class="nav-btn" id="btn-refresh-admin">
+          🔄 Refresh Data
+        </button>
+        <button type="button" class="nav-btn btn-logout-admin" id="btn-logout-admin" title="Lock the admin portal">
+          🔒 Lock & Log Out
+        </button>
+        <a href="/" class="nav-btn">
+          🎙️ Collector
+        </a>
+        <a href="/practice.html" class="nav-btn">
+          🎧 Practice
+        </a>
+
+        <div id="drive-auth-container" class="drive-auth-group">
+          <span id="badge-drive-connected" class="auth-status-badge" style="display:none;">
+            <span class="pulse-dot"></span> ☁️ Drive Connected
+          </span>
+          <a id="btn-auth-drive" href="/auth/google" class="nav-btn" style="display:none;">
+            🔑 Connect Drive
+          </a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-main">
+
+    <!-- ── Statistics KPI Overview ───────────────────────────────── -->
+    <section class="admin-section">
+      <div class="section-heading">
+        <h2>📊 Overall Statistics</h2>
+        <span class="section-sub">Consolidated across all contributors and languages</span>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon">📝</div>
+          <div class="kpi-info">
+            <span class="kpi-val" id="kpi-akan-questions">—</span>
+            <span class="kpi-label">Akan Questions</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-icon">📋</div>
+          <div class="kpi-info">
+            <span class="kpi-val" id="kpi-ewe-questions">—</span>
+            <span class="kpi-label">Ewe Questions</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-icon">👥</div>
+          <div class="kpi-info">
+            <span class="kpi-val" id="kpi-total-users">—</span>
+            <span class="kpi-label">Active Contributors</span>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-icon">🎙️</div>
+          <div class="kpi-info">
+            <span class="kpi-val" id="kpi-total-recordings">—</span>
+            <span class="kpi-label">Total Audio Recordings</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Contributor Leaderboard & Management ──────────────────── -->
+    <section class="admin-section">
+      <div class="section-heading">
+        <h2>👥 Contributors & Folders</h2>
+        <span class="section-sub">Individual recording progress per user</span>
+      </div>
+
+      <div class="admin-card">
+        <div class="table-responsive">
+          <table class="admin-table" id="users-table">
+            <thead>
+              <tr>
+                <th>Contributor</th>
+                <th>Total Takes</th>
+                <th>Akan Takes</th>
+                <th>Ewe Takes</th>
+                <th>Prompts / Options</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-table-body">
+              <tr><td colspan="6" class="text-center py-4">Loading contributors…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Audio Explorer & In-line Player ───────────────────────── -->
+    <section class="admin-section">
+      <div class="section-heading">
+        <h2>🎧 Audio Recordings Explorer</h2>
+        <span class="section-sub">Listen to, inspect, and manage audio takes per contributor</span>
+      </div>
+
+      <div class="admin-toolbar">
+        <div class="admin-filter-group">
+          <div class="filter-item">
+            <label for="filter-user">Contributor:</label>
+            <select id="filter-user">
+              <option value="all">All Contributors</option>
+            </select>
+          </div>
+
+          <div class="filter-item">
+            <label for="filter-lang">Language:</label>
+            <select id="filter-lang">
+              <option value="all">All Languages</option>
+              <option value="akan">Akan</option>
+              <option value="ewe">Ewe</option>
+            </select>
+          </div>
+
+          <div class="filter-item">
+            <label for="filter-track">Track:</label>
+            <select id="filter-track">
+              <option value="all">All Tracks</option>
+              <option value="question">Prompt</option>
+              <option value="options">Options</option>
+            </select>
+          </div>
+
+          <div class="filter-item filter-checkbox-item">
+            <label>
+              <input type="checkbox" id="check-practice" /> Include Practice Takes
+            </label>
+          </div>
+        </div>
+
+        <div class="admin-search-wrap">
+          <input type="search" id="admin-search" placeholder="Search by question ID, user, or file…" />
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <div class="table-summary-bar">
+          <span id="recordings-count-badge">Showing 0 recordings</span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="admin-table" id="recordings-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Question</th>
+                <th>Lang</th>
+                <th>Track</th>
+                <th>Filename / Size</th>
+                <th>In-line Player</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recordings-table-body">
+              <tr><td colspan="7" class="text-center py-4">Loading recordings…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Rename User Modal ──────────────────────────────────────── -->
+  <div id="rename-modal" class="modal-overlay" hidden>
+    <div class="modal-box rename-modal-box">
+      <div class="modal-header">
+        <h3 style="margin:0;">✏️ Rename / Merge Contributor</h3>
+        <button class="modal-close" id="rename-modal-close" aria-label="Close">✕</button>
+      </div>
+      <p style="margin:12px 0 16px;color:#475569;font-size:0.9rem;line-height:1.4;">
+        This will update the user folder name locally and in Google Drive. All associated recordings will be moved under the new contributor name.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:0.8rem;color:#64748b;display:block;margin-bottom:4px;">Current Name:</label>
+          <input type="text" id="rename-current-user" readonly style="width:100%;padding:8px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div>
+          <label style="font-size:0.8rem;color:#64748b;display:block;margin-bottom:4px;">New Name / ID:</label>
+          <input type="text" id="rename-new-user" placeholder="e.g. Ama_New" maxlength="40" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+          <button type="button" class="btn btn-stop" id="btn-cancel-rename">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btn-confirm-rename">Apply Rename</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+</html>
+

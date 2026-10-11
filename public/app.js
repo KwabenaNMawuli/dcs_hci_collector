@@ -84,12 +84,29 @@ async function checkAuthStatus() {
   try {
     const res = await fetch('/api/auth-status');
     const data = await res.json();
+    const btnReauth = document.getElementById('btn-reauth-drive');
+
     if (data.authenticated) {
       if (badgeDriveConnected) badgeDriveConnected.style.display = 'inline-flex';
       if (btnAuthDrive) btnAuthDrive.style.display = 'none';
+
+      if (btnReauth) {
+        btnReauth.style.display = 'inline-flex';
+        if (!data.hasFullDriveScope) {
+          btnReauth.textContent = '⚠️ Reconnect to see prior files';
+          btnReauth.style.background = '#fef08a';
+          btnReauth.style.color = '#854d0e';
+          btnReauth.title = 'Current token has restricted permissions and cannot see files from prior deploys. Click to grant full Drive access.';
+        } else {
+          btnReauth.textContent = '🔄 Reconnect';
+          btnReauth.style.background = '';
+          btnReauth.style.color = '';
+        }
+      }
     } else {
       if (btnAuthDrive) btnAuthDrive.style.display = 'inline-flex';
       if (badgeDriveConnected) badgeDriveConnected.style.display = 'none';
+      if (btnReauth) btnReauth.style.display = 'none';
     }
   } catch (err) {
     console.warn('Could not check auth status:', err);

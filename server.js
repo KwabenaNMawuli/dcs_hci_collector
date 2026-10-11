@@ -394,9 +394,22 @@ app.get('/api/auth-status', (req, res) => {
     process.env.GOOGLE_REFRESH_TOKEN
   );
 
+  let currentScope = (oauth2Client && oauth2Client.credentials && oauth2Client.credentials.scope) || '';
+  if (!currentScope && fs.existsSync(TOKEN_PATH)) {
+    try {
+      const t = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+      currentScope = t.scope || '';
+    } catch (_) {}
+  }
+
+  // Check if token has full Drive scope (not just restricted drive.file)
+  const hasFullDriveScope = currentScope.split(' ').some((s) => s === 'https://www.googleapis.com/auth/drive');
+
   res.json({
     configured: oauthConfigured,
     authenticated: isAuthenticated,
+    hasFullDriveScope,
+    scope: currentScope,
   });
 });
 

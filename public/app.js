@@ -204,6 +204,12 @@ function updateStats() {
     statDriveFiles.textContent = totalDriveAudios;
     chipTotalAudios.style.display = totalDriveAudios > 0 ? 'inline-flex' : 'none';
   }
+
+  const percent = total > 0 ? Math.round((fullyRecorded / total) * 100) : 0;
+  const progressFill = document.getElementById('stats-progress-fill');
+  const progressText = document.getElementById('stats-progress-text');
+  if (progressFill) progressFill.style.width = `${percent}%`;
+  if (progressText) progressText.textContent = `${percent}% complete (${fullyRecorded}/${total})`;
 }
 
 // ── Grid rendering ─────────────────────────────────────────────────────────

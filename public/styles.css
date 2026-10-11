@@ -37,8 +37,7 @@ body {
 .app-header {
   background: var(--clr-primary);
   color: #fff;
-  padding: 0 24px;
-  box-shadow: 0 2px 6px rgba(0,0,0,.2);
+  box-shadow: 0 2px 8px rgba(0,0,0,.22);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -47,80 +46,169 @@ body {
 .header-inner {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 12px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 72px;
   gap: 16px;
   flex-wrap: wrap;
 }
 
-.header-title {
+.header-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .mic-icon { font-size: 2rem; line-height: 1; }
 
-.header-title h1 {
+.header-title-group h1 {
   font-size: 1.35rem;
   font-weight: 600;
   letter-spacing: -.3px;
+  line-height: 1.2;
 }
 
 .header-subtitle {
   font-size: .8rem;
   opacity: .85;
-  margin-top: 1px;
+  margin-top: 2px;
 }
 
-/* ── Status chips ──────────────────────────────────────────────── */
-.status-bar { display: flex; gap: 12px; flex-wrap: wrap; }
-
-.status-chip {
+.header-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: rgba(255,255,255,.18);
-  border-radius: 20px;
-  padding: 4px 12px;
-  font-size: .85rem;
-  font-weight: 500;
-  white-space: nowrap;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
+.drive-auth-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-btn,
 .auth-btn {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   background: #ffffff;
-  color: #1a73e8;
+  color: var(--clr-primary);
   font-weight: 600;
   font-size: .85rem;
-  padding: 5px 14px;
+  padding: 6px 14px;
   border-radius: 20px;
   text-decoration: none;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-  transition: background 0.15s, transform 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
+.nav-btn:hover,
 .auth-btn:hover {
   background: #f1f3f4;
   transform: translateY(-1px);
 }
 
+.auth-reconnect-btn {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.auth-reconnect-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+}
+
+.auth-status-badge,
 .auth-badge {
   display: inline-flex;
   align-items: center;
-  background: rgba(255,255,255,0.25);
+  gap: 6px;
+  background: rgba(255,255,255,0.22);
   color: #ffffff;
   font-weight: 600;
-  font-size: .85rem;
-  padding: 4px 12px;
+  font-size: .82rem;
+  padding: 5px 12px;
   border-radius: 20px;
+  white-space: nowrap;
+}
+
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  background: #81c995;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #81c995;
+}
+
+/* ── Subheader Stats Ribbon ────────────────────────────────────── */
+.stats-ribbon {
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 24px;
+}
+
+.stats-ribbon-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.stats-chips-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: .82rem;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.status-chip .chip-val {
+  font-weight: 700;
+  font-size: .88rem;
+}
+
+.status-chip .chip-label {
+  opacity: .9;
+}
+
+.chip-recorded {
+  background: rgba(129, 201, 149, 0.24);
+  border-color: rgba(129, 201, 149, 0.45);
+}
+.chip-partial {
+  background: rgba(253, 214, 99, 0.28);
+  border-color: rgba(253, 214, 99, 0.5);
+}
+.chip-missing {
+  background: rgba(255, 183, 77, 0.22);
+  border-color: rgba(255, 183, 77, 0.38);
+}
+.chip-drive-audios {
+  background: rgba(138, 180, 248, 0.24);
+  border-color: rgba(138, 180, 248, 0.45);
 }
 
 .chip-dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -128,7 +216,37 @@ body {
 .dot-yellow { background: #fdd663; }
 .dot-orange { background: #ffb74d; }
 .dot-blue   { background: #8ab4f8; }
-.dot-grey   { background: rgba(255,255,255,.5); }
+.dot-grey   { background: rgba(255,255,255,.6); }
+
+/* Progress overview */
+.stats-progress-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+}
+
+.stats-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.stats-progress-fill {
+  height: 100%;
+  background: #81c995;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.stats-progress-text {
+  font-size: .78rem;
+  font-weight: 600;
+  opacity: .95;
+  white-space: nowrap;
+}
 
 /* ── Toolbar ───────────────────────────────────────────────────── */
 .toolbar {
@@ -702,13 +820,23 @@ body {
 }
 
 /* ── Responsive ────────────────────────────────────────────────── */
-@media (max-width: 600px) {
-  .header-inner { height: auto; padding: 12px 0; flex-direction: column; align-items: flex-start; }
+@media (max-width: 768px) {
+  .header-inner { padding: 12px 16px; flex-direction: column; align-items: stretch; gap: 12px; }
+  .header-controls { justify-content: space-between; }
+  .stats-ribbon { padding: 8px 16px; }
+  .stats-ribbon-inner { flex-direction: column; align-items: stretch; gap: 10px; }
+  .stats-chips-group { justify-content: flex-start; }
+  .stats-progress-group { width: 100%; }
   .modal-box { padding: 20px 16px 18px; }
   .record-controls { flex-wrap: wrap; }
   .btn { padding: 10px 14px; }
-  .lang-switcher-container { width: 100%; }
-  .lang-toggle-group { width: 100%; }
+  .lang-switcher-container { width: auto; }
+}
+
+@media (max-width: 480px) {
+  .header-controls { flex-direction: column; align-items: stretch; }
+  .lang-switcher-container, .lang-toggle-group { width: 100%; }
   .lang-btn { flex: 1; justify-content: center; }
+  .drive-auth-group { width: 100%; justify-content: space-between; }
 }
 

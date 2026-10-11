@@ -49,6 +49,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve admin dashboard at /admin and /admin.html
+app.get(['/admin', '/admin.html'], (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 // ---------------------------------------------------------------------------
 // Multer setup
 // ---------------------------------------------------------------------------

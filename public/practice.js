@@ -142,8 +142,18 @@ async function startRecording() {
   const mimeType = getMimeType();
   mediaRecorder = new MediaRecorder(micStream, mimeType ? { mimeType } : {});
   mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) chunks.push(e.data); });
-  mediaRecorder.addEventListener('stop', () => {
-    takeBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+  mediaRecorder.addEventListener('stop', async () => {
+    const rawBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+    saveStatus.textContent = '⚡ Converting to MP3…';
+    try {
+      if (typeof window.audioBlobToMp3 === 'function') {
+        takeBlob = await window.audioBlobToMp3(rawBlob, 128);
+      } else {
+        takeBlob = rawBlob;
+      }
+    } catch (_) {
+      takeBlob = rawBlob;
+    }
     audioEl.src = URL.createObjectURL(takeBlob);
     btnPlay.disabled = false;
     btnSave.disabled = false;
@@ -193,22 +203,24 @@ btnSave.addEventListener('click', async () => {
   const q = questions[index];
   if (!takeBlob || !q) return;
 
+  const currentUser = localStorage.getItem('dcs_audio_user') || 'default_user';
+
   btnSave.disabled = true;
   saveStatus.className = 'upload-status';
-  saveStatus.textContent = '⏳ Saving…';
+  saveStatus.textContent = '⏳ Saving MP3…';
 
-  const ext = takeBlob.type.includes('ogg') ? '.ogg' : takeBlob.type.includes('mp4') ? '.m4a' : '.webm';
   const form = new FormData();
-  form.append('audio', takeBlob, `practice${ext}`);
+  form.append('audio', takeBlob, `practice_${q.id}_${lang}.mp3`);
   form.append('questionId', q.id);
   form.append('lang', lang);
+  form.append('user', currentUser);
 
   try {
     const res = await fetch('/api/practice-upload', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
     saveStatus.className = 'upload-status success';
-    saveStatus.textContent = `✅ Saved to practice folder as ${data.filename}`;
+    saveStatus.textContent = `✅ Saved to ${currentUser}'s practice folder as ${data.filename}`;
   } catch (err) {
     saveStatus.className = 'upload-status error';
     saveStatus.textContent = `❌ Save failed: ${err.message}`;

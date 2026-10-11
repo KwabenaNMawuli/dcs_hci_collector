@@ -32,15 +32,23 @@
       </div>
 
       <div id="status-bar" class="status-bar">
-        <div class="status-chip" id="chip-recorded">
+        <div class="status-chip" id="chip-recorded" title="Fully recorded questions">
           <span class="chip-dot dot-green"></span>
           <span id="stat-recorded">—</span> recorded
         </div>
-        <div class="status-chip" id="chip-missing">
+        <div class="status-chip" id="chip-partial" style="display:none;" title="Questions with only one track recorded">
+          <span class="chip-dot dot-yellow"></span>
+          <span id="stat-partial">—</span> partial
+        </div>
+        <div class="status-chip" id="chip-missing" title="Unrecorded questions">
           <span class="chip-dot dot-orange"></span>
           <span id="stat-missing">—</span> missing
         </div>
-        <div class="status-chip">
+        <div class="status-chip" id="chip-total-audios" style="display:none;" title="Total recognized audio files in Drive">
+          <span class="chip-dot dot-blue"></span>
+          <span id="stat-drive-files">—</span> audios in Drive
+        </div>
+        <div class="status-chip" title="Total questions in questionnaire">
           <span class="chip-dot dot-grey"></span>
           <span id="stat-total">—</span> total
         </div>
@@ -71,8 +79,9 @@
       <label class="filter-label">Show:</label>
       <select id="filter-select" aria-label="Filter questions">
         <option value="all">All questions</option>
-        <option value="missing">Missing audio</option>
-        <option value="recorded">Already recorded</option>
+        <option value="missing">Missing audio (unrecorded)</option>
+        <option value="partial">Partially recorded</option>
+        <option value="recorded">Fully recorded</option>
       </select>
     </div>
   </div>

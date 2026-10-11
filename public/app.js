@@ -61,8 +61,12 @@ const timerEl      = document.getElementById('record-timer');
 const canvas       = document.getElementById('waveform');
 const playbackAudio= document.getElementById('playback-audio');
 const statRecorded = document.getElementById('stat-recorded');
+const statPartial  = document.getElementById('stat-partial');
+const chipPartial  = document.getElementById('chip-partial');
 const statMissing  = document.getElementById('stat-missing');
 const statTotal    = document.getElementById('stat-total');
+const statDriveFiles = document.getElementById('stat-drive-files');
+const chipTotalAudios = document.getElementById('chip-total-audios');
 const btnAuthDrive = document.getElementById('btn-auth-drive');
 const badgeDriveConnected = document.getElementById('badge-drive-connected');
 
@@ -144,6 +148,8 @@ async function switchLanguage(lang) {
   }
 }
 
+let totalDriveAudios = 0;
+
 // ── Data loading ───────────────────────────────────────────────────────────
 async function loadQuestions(lang = currentLang) {
   try {
@@ -151,6 +157,7 @@ async function loadQuestions(lang = currentLang) {
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
     allQuestions = data.questions;
+    totalDriveAudios = (data.stats && data.stats.totalDriveFiles) || 0;
     updateStats();
     applyFilters();
   } catch (err) {
@@ -162,12 +169,24 @@ async function loadQuestions(lang = currentLang) {
 }
 
 function updateStats() {
-  const total    = allQuestions.length;
-  const recorded = allQuestions.filter(q => q.hasAudio).length;
-  const missing  = total - recorded;
-  statTotal.textContent    = total;
-  statRecorded.textContent = recorded;
-  statMissing.textContent  = missing;
+  const total = allQuestions.length;
+  const fullyRecorded = allQuestions.filter(q => q.hasAudio).length;
+  const partial = allQuestions.filter(q => q.hasPartial).length;
+  const missing = total - fullyRecorded - partial;
+
+  if (statTotal) statTotal.textContent = total;
+  if (statRecorded) statRecorded.textContent = fullyRecorded;
+  if (statMissing) statMissing.textContent = missing;
+
+  if (statPartial && chipPartial) {
+    statPartial.textContent = partial;
+    chipPartial.style.display = partial > 0 ? 'inline-flex' : 'none';
+  }
+
+  if (statDriveFiles && chipTotalAudios) {
+    statDriveFiles.textContent = totalDriveAudios;
+    chipTotalAudios.style.display = totalDriveAudios > 0 ? 'inline-flex' : 'none';
+  }
 }
 
 // ── Grid rendering ─────────────────────────────────────────────────────────
@@ -186,15 +205,24 @@ function renderGrid(questions) {
 function buildCard(q) {
   const card = document.createElement('div');
   const hasOpts = Array.isArray(q.options) && q.options.length > 0;
-  
-  card.className = `q-card ${q.hasAudio ? 'recorded' : 'missing'}`;
+
+  const cardStatus = q.hasAudio ? 'recorded' : (q.hasPartial ? 'partial' : 'missing');
+  card.className = `q-card ${cardStatus}`;
   card.dataset.id = q.id;
 
   let badgeLabel = 'No audio';
+  let badgeClass = 'missing';
+
   if (q.hasAudio) {
     badgeLabel = '✔ Fully Recorded';
-  } else if (hasOpts && (q.hasQuestionAudio || q.hasOptionsAudio)) {
-    badgeLabel = '⏳ Partial';
+    badgeClass = 'recorded';
+  } else if (q.hasPartial) {
+    if (q.hasQuestionAudio) {
+      badgeLabel = '⏳ Partial (Prompt)';
+    } else {
+      badgeLabel = '⏳ Partial (Options)';
+    }
+    badgeClass = 'partial';
   }
 
   const langLabel = currentLang.toUpperCase();
@@ -205,7 +233,7 @@ function buildCard(q) {
         <span class="q-id">${q.id}</span>
         <span class="card-lang-tag">${langLabel}</span>
       </div>
-      <span class="q-badge ${q.hasAudio ? 'recorded' : (badgeLabel.includes('Partial') ? 'recorded' : 'missing')}">
+      <span class="q-badge ${badgeClass}">
         ${badgeLabel}
       </span>
     </div>
@@ -276,7 +304,8 @@ function applyFilters() {
 
   const filtered = allQuestions.filter(q => {
     if (filter === 'recorded' && !q.hasAudio) return false;
-    if (filter === 'missing'  &&  q.hasAudio) return false;
+    if (filter === 'partial'  && !q.hasPartial) return false;
+    if (filter === 'missing'  && (q.hasAudio || q.hasPartial)) return false;
     if (query) {
       return q.id.toLowerCase().includes(query) ||
              (q.text && q.text.toLowerCase().includes(query));
@@ -520,6 +549,8 @@ async function uploadAudio() {
 
     const hasOpts = Array.isArray(currentQ.options) && currentQ.options.length > 0;
     currentQ.hasAudio = hasOpts ? (currentQ.hasQuestionAudio && currentQ.hasOptionsAudio) : currentQ.hasQuestionAudio;
+    currentQ.hasPartial = !currentQ.hasAudio && (currentQ.hasQuestionAudio || currentQ.hasOptionsAudio);
+    totalDriveAudios++;
 
     updateTrackBadges();
     updateCardInGrid(currentQ);

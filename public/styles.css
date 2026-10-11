@@ -125,7 +125,9 @@ body {
   flex-shrink: 0;
 }
 .dot-green  { background: #81c995; }
+.dot-yellow { background: #fdd663; }
 .dot-orange { background: #ffb74d; }
+.dot-blue   { background: #8ab4f8; }
 .dot-grey   { background: rgba(255,255,255,.5); }
 
 /* ── Toolbar ───────────────────────────────────────────────────── */
@@ -197,6 +199,7 @@ body {
   box-shadow: 0 4px 12px rgba(0,0,0,.14);
 }
 .q-card.recorded { border-left: 4px solid var(--clr-success); }
+.q-card.partial  { border-left: 4px solid #f9ab00; }
 .q-card.missing  { border-left: 4px solid #e0e0e0; }
 
 .card-top {
@@ -224,6 +227,10 @@ body {
 .q-badge.recorded {
   background: var(--clr-recorded-bg);
   color: var(--clr-success);
+}
+.q-badge.partial {
+  background: #fef7e0;
+  color: #b06000;
 }
 .q-badge.missing {
   background: #f1f3f4;

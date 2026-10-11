@@ -226,6 +226,8 @@ async function getQuestions(lang = 'akan') {
 // ---------------------------------------------------------------------------
 // List Drive files in target folder
 // ---------------------------------------------------------------------------
+const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
+
 async function listDriveFiles() {
   const drive = getDriveClient();
   if (!DRIVE_FOLDER_ID) {
@@ -236,24 +238,55 @@ async function listDriveFiles() {
   const filesMap = new Map();
   let pageToken = null;
 
-  do {
-    const res = await drive.files.list({
-      q: `'${cleanFolderId}' in parents and trashed = false`,
-      fields: 'nextPageToken, files(id, name, webViewLink, webContentLink)',
-      pageSize: 1000,
-      pageToken: pageToken || undefined,
-    });
-
-    for (const file of res.data.files) {
-      filesMap.set(file.name, {
-        fileId: file.id,
-        webViewLink: file.webViewLink,
-        webContentLink: file.webContentLink,
+  try {
+    do {
+      const res = await drive.files.list({
+        q: `'${cleanFolderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id, name, webViewLink, webContentLink)',
+        pageSize: 1000,
+        pageToken: pageToken || undefined,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
-    }
 
-    pageToken = res.data.nextPageToken;
-  } while (pageToken);
+      if (res.data.files) {
+        for (const file of res.data.files) {
+          if (!file.name) continue;
+          const normKey = file.name.trim().toLowerCase();
+          filesMap.set(normKey, {
+            fileId: file.id,
+            name: file.name,
+            webViewLink: file.webViewLink,
+            webContentLink: file.webContentLink,
+            isLocal: false,
+          });
+        }
+      }
+
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
+  } catch (err) {
+    console.warn('listDriveFiles error:', err.message);
+  }
+
+  // Also include local files in uploads folder as local fallback
+  if (fs.existsSync(UPLOADS_DIR)) {
+    try {
+      const localEntries = fs.readdirSync(UPLOADS_DIR);
+      for (const lf of localEntries) {
+        const normKey = lf.trim().toLowerCase();
+        if (!filesMap.has(normKey) && EXTS.some((e) => normKey.endsWith(e))) {
+          filesMap.set(normKey, {
+            fileId: `local-${lf}`,
+            name: lf,
+            webViewLink: null,
+            webContentLink: null,
+            isLocal: true,
+          });
+        }
+      }
+    } catch (_) {}
+  }
 
   return filesMap;
 }
@@ -261,12 +294,11 @@ async function listDriveFiles() {
 // ---------------------------------------------------------------------------
 // Audio File Lookup Helpers
 // ---------------------------------------------------------------------------
-const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
-
 function findDriveFile(filesMap, prefixes) {
   for (const prefix of prefixes) {
+    const normPrefix = prefix.trim().toLowerCase();
     for (const ext of EXTS) {
-      const key = `${prefix}${ext}`;
+      const key = `${normPrefix}${ext}`;
       if (filesMap.has(key)) {
         return filesMap.get(key);
       }
@@ -277,34 +309,39 @@ function findDriveFile(filesMap, prefixes) {
 
 function getAudioPrefixes(qid, targetType, lang) {
   const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+  const otherLang = normLang === 'ewe' ? 'akan' : 'ewe';
   const isOptions = targetType === 'options';
 
   if (isOptions) {
-    const prefixes = [
+    return [
+      // Language-specific options formats
       `${qid}_options_${normLang}`,
       `${qid}_opts_${normLang}`,
       `${qid}_${normLang}_options`,
       `${qid}_${normLang}_opts`,
       `${qid}_options.${normLang}`,
       `${qid}.${normLang}_options`,
+      // Backward-compatible un-suffixed formats from previous deploys
+      `${qid}_options`,
+      `${qid}_opts`,
+      `${qid}_opt`,
     ];
-    if (normLang === 'akan') {
-      prefixes.push(`${qid}_options`, `${qid}_opts`);
-    }
-    return prefixes;
   } else {
-    const prefixes = [
+    return [
+      // Language-specific question formats
       `${qid}_question_${normLang}`,
       `${qid}_${normLang}_question`,
       `${qid}_question.${normLang}`,
       `${qid}.${normLang}_question`,
       `${qid}_${normLang}`,
       `${qid}.${normLang}`,
+      `${qid}_prompt_${normLang}`,
+      // Backward-compatible un-suffixed formats from previous deploys
+      `${qid}_question`,
+      `${qid}_prompt`,
+      `${qid}`,
+      `${qid}_q`,
     ];
-    if (normLang === 'akan') {
-      prefixes.push(`${qid}_question`, qid);
-    }
-    return prefixes;
   }
 }
 
@@ -320,7 +357,10 @@ app.get('/auth/google', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/drive.file'],
+    scope: [
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/drive.file',
+    ],
   });
 
   res.redirect(url);
@@ -375,6 +415,10 @@ app.get('/api/questions', async (req, res) => {
       // Drive might not be connected yet
     }
 
+    let fullyRecordedCount = 0;
+    let partialCount = 0;
+    let unrecordedCount = 0;
+
     const enriched = questions.map((q) => {
       const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
       const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
@@ -383,20 +427,45 @@ app.get('/api/questions', async (req, res) => {
       const optsFile = findDriveFile(filesMap, optsPrefixes);
 
       const hasOptions = Array.isArray(q.options) && q.options.length > 0;
+      const hasQuestionAudio = !!qFile;
+      const hasOptionsAudio = !!optsFile;
+
+      // Fully recorded: if has options, both needed; if no options, question needed
+      const isComplete = hasOptions ? (hasQuestionAudio && hasOptionsAudio) : hasQuestionAudio;
+      // Partial: has at least one recorded track but not complete
+      const isPartial = !isComplete && (hasQuestionAudio || hasOptionsAudio);
+
+      if (isComplete) {
+        fullyRecordedCount++;
+      } else if (isPartial) {
+        partialCount++;
+      } else {
+        unrecordedCount++;
+      }
 
       return {
         ...q,
         lang,
-        hasQuestionAudio: !!qFile,
+        hasQuestionAudio,
         questionDriveLink: qFile ? qFile.webViewLink : null,
-        hasOptionsAudio: !!optsFile,
+        hasOptionsAudio,
         optionsDriveLink: optsFile ? optsFile.webViewLink : null,
-        // Overall status: if has options, both needed; if no options, question needed
-        hasAudio: hasOptions ? (!!qFile && !!optsFile) : !!qFile,
+        hasPartial: isPartial,
+        hasAudio: isComplete,
       };
     });
 
-    res.json({ lang, questions: enriched });
+    res.json({
+      lang,
+      questions: enriched,
+      stats: {
+        total: questions.length,
+        recorded: fullyRecordedCount,
+        partial: partialCount,
+        missing: unrecordedCount,
+        totalDriveFiles: filesMap.size,
+      },
+    });
   } catch (err) {
     console.error('GET /api/questions error:', err);
     res.status(500).json({ error: err.message });
@@ -588,7 +657,7 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
   }
 });
 
-app.get('/api/status',async (req, res) => {
+app.get('/api/status', async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const questions = await getQuestions(lang);
@@ -598,6 +667,7 @@ app.get('/api/status',async (req, res) => {
     } catch (_) {}
 
     let fullyRecorded = 0;
+    let partial = 0;
     for (const q of questions) {
       const qPrefixes = getAudioPrefixes(q.id, 'question', lang);
       const optsPrefixes = getAudioPrefixes(q.id, 'options', lang);
@@ -606,8 +676,11 @@ app.get('/api/status',async (req, res) => {
       const optsFile = findDriveFile(filesMap, optsPrefixes);
       const hasOptions = Array.isArray(q.options) && q.options.length > 0;
 
-      if (hasOptions ? (qFile && optsFile) : qFile) {
+      const complete = hasOptions ? (!!qFile && !!optsFile) : !!qFile;
+      if (complete) {
         fullyRecorded++;
+      } else if (qFile || optsFile) {
+        partial++;
       }
     }
 
@@ -615,7 +688,9 @@ app.get('/api/status',async (req, res) => {
       lang,
       total: questions.length,
       recorded: fullyRecorded,
-      missing: questions.length - fullyRecorded,
+      partial,
+      missing: questions.length - fullyRecorded - partial,
+      totalDriveFiles: filesMap.size,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

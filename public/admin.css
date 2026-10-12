@@ -281,6 +281,16 @@
 }
 .btn-rename-user:hover { background: #f1f5f9; }
 
+.btn-export-user {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+.btn-export-user:hover {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .rename-modal-box {
   max-width: 440px;
   padding: 24px;

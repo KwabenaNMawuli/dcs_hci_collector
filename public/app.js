@@ -68,7 +68,7 @@ const btnAuthDrive = document.getElementById('btn-auth-drive');
 const badgeDriveConnected = document.getElementById('badge-drive-connected');
 
 // ── Init ───────────────────────────────────────────────────────────────────
-(async function init() {
+async function init() {
   initUser();
   await checkAuthStatus();
   bindLangButtons();
@@ -76,7 +76,13 @@ const badgeDriveConnected = document.getElementById('badge-drive-connected');
   await loadQuestions(currentLang);
   bindToolbar();
   bindTrackTabs();
-})();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
 
 // ── User Identity ──────────────────────────────────────────────────────────
 function initUser() {
@@ -308,8 +314,8 @@ function applyFilters() {
 
 // ── Track Tabs Bindings ────────────────────────────────────────────────────
 function bindTrackTabs() {
-  tabTrackQ.addEventListener('click', () => switchTrack('question'));
-  tabTrackOpts.addEventListener('click', () => switchTrack('options'));
+  if (tabTrackQ) tabTrackQ.addEventListener('click', () => switchTrack('question'));
+  if (tabTrackOpts) tabTrackOpts.addEventListener('click', () => switchTrack('options'));
 }
 
 function switchTrack(track) {
@@ -324,15 +330,15 @@ function switchTrack(track) {
   resetRecordingUI();
 
   if (track === 'question') {
-    tabTrackQ.classList.add('active');
-    tabTrackOpts.classList.remove('active');
-    modalQView.style.display = 'block';
-    modalOptsView.style.display = 'none';
+    if (tabTrackQ) tabTrackQ.classList.add('active');
+    if (tabTrackOpts) tabTrackOpts.classList.remove('active');
+    if (modalQView) modalQView.style.display = 'block';
+    if (modalOptsView) modalOptsView.style.display = 'none';
   } else {
-    tabTrackOpts.classList.add('active');
-    tabTrackQ.classList.remove('active');
-    modalOptsView.style.display = 'block';
-    modalQView.style.display = 'none';
+    if (tabTrackOpts) tabTrackOpts.classList.add('active');
+    if (tabTrackQ) tabTrackQ.classList.remove('active');
+    if (modalOptsView) modalOptsView.style.display = 'block';
+    if (modalQView) modalQView.style.display = 'none';
   }
 
   updateTrackBadges();
@@ -343,7 +349,7 @@ function updateTrackBadges() {
   const sessionKey = `${currentUser}_${currentQ.id}_${currentTrack}_${currentLang}`;
   const isRecorded = sessionRecorded.has(sessionKey);
 
-  replaceWarn.hidden = !isRecorded;
+  if (replaceWarn) replaceWarn.hidden = !isRecorded;
   if (badgeQStatus) badgeQStatus.textContent = '';
   if (badgeOptsStatus) badgeOptsStatus.textContent = '';
 }
@@ -351,50 +357,52 @@ function updateTrackBadges() {
 // ── Modal open / close ─────────────────────────────────────────────────────
 function openModal(q, preferredTrack = 'question') {
   currentQ = q;
-  modalQid.textContent = q.id;
-  modalTitle.textContent = q.text || 'No question text';
-  modalPromptText.textContent = q.text || 'No prompt available';
+  if (modalQid) modalQid.textContent = q.id;
+  if (modalTitle) modalTitle.textContent = q.text || 'No question text';
+  if (modalPromptText) modalPromptText.textContent = q.text || 'No prompt available';
 
   setLanguageUI(currentLang);
 
   const hasOpts = Array.isArray(q.options) && q.options.length > 0;
 
-  modalOptionsList.innerHTML = '';
-  if (hasOpts) {
-    trackSwitcher.style.display = 'flex';
-    tabTrackOpts.style.display = 'flex';
-    q.options.forEach((opt) => {
-      const li = document.createElement('li');
-      li.textContent = opt;
-      modalOptionsList.appendChild(li);
-    });
-  } else {
-    trackSwitcher.style.display = 'none';
+  if (modalOptionsList) {
+    modalOptionsList.innerHTML = '';
+    if (hasOpts) {
+      if (trackSwitcher) trackSwitcher.style.display = 'flex';
+      if (tabTrackOpts) tabTrackOpts.style.display = 'flex';
+      q.options.forEach((opt) => {
+        const li = document.createElement('li');
+        li.textContent = opt;
+        modalOptionsList.appendChild(li);
+      });
+    } else {
+      if (trackSwitcher) trackSwitcher.style.display = 'none';
+    }
   }
 
   switchTrack(hasOpts && preferredTrack === 'options' ? 'options' : 'question');
 
-  modal.hidden = false;
+  if (modal) modal.hidden = false;
   document.body.style.overflow = 'hidden';
 }
 
 function closeModal() {
   stopRecording(false);
   clearWaveform();
-  modal.hidden = true;
+  if (modal) modal.hidden = true;
   document.body.style.overflow = '';
   currentQ = null;
 }
 
-modalClose.addEventListener('click', closeModal);
-modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+if (modalClose) modalClose.addEventListener('click', closeModal);
+if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
 // ── Recording logic ────────────────────────────────────────────────────────
-btnRecord.addEventListener('click', startRecording);
-btnStop.addEventListener('click',   () => stopRecording(true));
-btnPlay.addEventListener('click',   playBack);
-btnUpload.addEventListener('click', uploadAudio);
+if (btnRecord) btnRecord.addEventListener('click', startRecording);
+if (btnStop) btnStop.addEventListener('click',   () => stopRecording(true));
+if (btnPlay) btnPlay.addEventListener('click',   playBack);
+if (btnUpload) btnUpload.addEventListener('click', uploadAudio);
 
 async function startRecording() {
   try {

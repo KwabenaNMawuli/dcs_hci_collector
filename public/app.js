@@ -16,9 +16,8 @@ let currentTrack   = 'question'; // 'question' | 'options'
 // Session takes: keeps track of questions recorded in current session
 const sessionRecorded = new Set();
 
-// MediaRecorder state
-let mediaRecorder  = null;
-let audioChunks    = [];
+// WAV Recorder state
+let wavRecorder    = null;
 let recordedBlob   = null;
 let timerInterval  = null;
 let elapsedSeconds = 0;
@@ -312,7 +311,7 @@ function bindTrackTabs() {
 }
 
 function switchTrack(track) {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
+  if (wavRecorder && wavRecorder.isRecording) {
     if (!confirm('Switching tracks will discard the current recording. Continue?')) {
       return;
     }
@@ -405,50 +404,24 @@ async function startRecording() {
     return;
   }
 
-  audioCtx  = new AudioContext();
+  const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+  audioCtx  = new AudioCtxClass();
+  if (audioCtx.state === 'suspended') {
+    try { await audioCtx.resume(); } catch (_) {}
+  }
+
   analyser  = audioCtx.createAnalyser();
   analyser.fftSize = 1024;
   const source = audioCtx.createMediaStreamSource(micStream);
   source.connect(analyser);
   drawWaveform();
 
-  audioChunks  = [];
   recordedBlob = null;
-  const mimeType = getSupportedMimeType();
-  mediaRecorder = new MediaRecorder(micStream, mimeType ? { mimeType } : {});
+  wavRecorder = new window.WavRecorder();
+  wavRecorder.start(micStream);
 
-  mediaRecorder.addEventListener('dataavailable', (e) => {
-    if (e.data.size > 0) audioChunks.push(e.data);
-  });
-
-  mediaRecorder.addEventListener('stop', async () => {
-    const rawBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
-    uploadStatus.textContent = '⚡ Converting to MP3…';
-    uploadStatus.className   = 'upload-status';
-
-    try {
-      if (typeof window.audioBlobToMp3 === 'function') {
-        recordedBlob = await window.audioBlobToMp3(rawBlob, 128);
-      } else {
-        recordedBlob = rawBlob;
-      }
-      playbackAudio.src = URL.createObjectURL(recordedBlob);
-      btnPlay.disabled   = false;
-      btnUpload.disabled = false;
-      uploadStatus.textContent = '🎵 Ready to upload (MP3 128kbps)';
-      uploadStatus.className   = 'upload-status';
-    } catch (err) {
-      console.warn('MP3 conversion fallback:', err);
-      recordedBlob = rawBlob;
-      playbackAudio.src = URL.createObjectURL(recordedBlob);
-      btnPlay.disabled   = false;
-      btnUpload.disabled = false;
-      uploadStatus.textContent = 'Ready to upload';
-      uploadStatus.className   = 'upload-status';
-    }
-  });
-
-  mediaRecorder.start(250);
+  uploadStatus.textContent = '🎙️ Recording…';
+  uploadStatus.className   = 'upload-status';
 
   elapsedSeconds = 0;
   timerEl.textContent = '00:00';
@@ -470,8 +443,21 @@ function stopRecording(keepAudio = true) {
   clearInterval(timerInterval);
   cancelAnimationFrame(animFrameId);
 
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+  if (wavRecorder) {
+    try {
+      const wav = wavRecorder.stop();
+      if (keepAudio) {
+        recordedBlob = wav;
+        playbackAudio.src = URL.createObjectURL(recordedBlob);
+        btnPlay.disabled   = false;
+        btnUpload.disabled = false;
+        uploadStatus.textContent = '🎵 Ready to upload (WAV)';
+        uploadStatus.className   = 'upload-status';
+      }
+    } catch (e) {
+      console.error('WAV stop error:', e);
+    }
+    wavRecorder = null;
   }
 
   if (micStream) {
@@ -480,13 +466,14 @@ function stopRecording(keepAudio = true) {
   }
 
   if (audioCtx) {
-    audioCtx.close();
+    try { audioCtx.close(); } catch (_) {}
     audioCtx = null;
     analyser = null;
   }
 
   if (!keepAudio) {
     recordedBlob = null;
+    playbackAudio.src = '';
   }
 
   btnRecord.disabled = false;
@@ -501,12 +488,12 @@ function playBack() {
     btnPlay.innerHTML = '<span class="btn-icon">⏸</span> Pause';
   } else {
     playbackAudio.pause();
-    btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play (MP3)';
+    btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play';
   }
 }
 
 playbackAudio.addEventListener('ended', () => {
-  btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play (MP3)';
+  btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play';
 });
 
 // ── Upload ─────────────────────────────────────────────────────────────────
@@ -514,12 +501,12 @@ async function uploadAudio() {
   if (!recordedBlob || !currentQ) return;
 
   btnUpload.disabled = true;
-  uploadStatus.textContent = '⏳ Uploading MP3 to folder…';
+  uploadStatus.textContent = '⏳ Uploading WAV to folder…';
   uploadStatus.className   = 'upload-status';
 
   const formData = new FormData();
   const suffix   = currentTrack === 'options' ? '_options' : '_question';
-  const audioFileName = `${currentQ.id}${suffix}_${currentLang}.mp3`;
+  const audioFileName = `${currentQ.id}${suffix}_${currentLang}.wav`;
 
   formData.append('audio', recordedBlob, audioFileName);
   formData.append('questionId', currentQ.id);
@@ -595,7 +582,6 @@ function clearWaveform() {
 
 function resetRecordingUI() {
   recordedBlob = null;
-  audioChunks  = [];
   elapsedSeconds = 0;
   timerEl.textContent      = '00:00';
   btnRecord.disabled       = false;
@@ -603,21 +589,11 @@ function resetRecordingUI() {
   btnStop.disabled         = true;
   btnPlay.disabled         = true;
   btnUpload.disabled       = true;
-  btnPlay.innerHTML        = '<span class="btn-icon">▶</span> Play (MP3)';
+  btnPlay.innerHTML        = '<span class="btn-icon">▶</span> Play';
   uploadStatus.textContent = '';
   uploadStatus.className   = 'upload-status';
   playbackAudio.src        = '';
   clearWaveform();
-}
-
-function getSupportedMimeType() {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/mp4',
-  ];
-  return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
 }
 
 function updateCardInGrid(q) {

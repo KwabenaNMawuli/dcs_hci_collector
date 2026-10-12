@@ -287,6 +287,9 @@ function renderUsersTable(users) {
           <button type="button" class="btn-icon-link btn-rename-user" data-user="${escapeHtml(u.user)}" title="Rename or merge user folder">
             ✏️ Rename
           </button>
+          <button type="button" class="btn-icon-link btn-reset-pin" data-user="${escapeHtml(u.user)}" title="Reset contributor passcode / PIN">
+            🔑 Reset PIN
+          </button>
         </div>
       </td>
     `;
@@ -306,6 +309,32 @@ function renderUsersTable(users) {
   usersTableBody.querySelectorAll('.btn-rename-user').forEach(btn => {
     btn.addEventListener('click', () => {
       openRenameModal(btn.dataset.user);
+    });
+  });
+
+  usersTableBody.querySelectorAll('.btn-reset-pin').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const u = btn.dataset.user;
+      const newPin = prompt(`Enter a new 4-digit PIN for contributor "${u}":`, '1234');
+      if (!newPin || newPin.trim().length < 4) {
+        if (newPin !== null) alert('PIN must be at least 4 digits or characters.');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        const { res, data } = await safeFetchJson('/api/admin/reset-user-pin', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ username: u, newPin: newPin.trim() }),
+        });
+        if (!res.ok) throw new Error((data && data.error) || 'Failed to reset PIN');
+        alert(`✅ PIN for "${u}" has been reset to: ${newPin.trim()}`);
+      } catch (err) {
+        alert('Could not reset PIN: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 }

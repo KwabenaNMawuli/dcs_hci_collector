@@ -258,4 +258,23 @@ function clearWaveform() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-load();
+async function initPractice() {
+  try {
+    const res = await fetch('/api/users/me');
+    const data = await res.json();
+    if (!data || !data.authenticated || !data.user) {
+      window.location.replace('/user-login.html');
+      return;
+    }
+    localStorage.setItem('dcs_audio_user', data.user.username);
+  } catch (_) {
+    const stored = localStorage.getItem('dcs_audio_user');
+    if (!stored || stored === 'default_user') {
+      window.location.replace('/user-login.html');
+      return;
+    }
+  }
+  load();
+}
+
+initPractice();

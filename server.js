@@ -124,6 +124,9 @@ app.post('/api/users/register', (req, res) => {
     res.cookie('dcs_contributor_token', token, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
     res.cookie('dcs_contributor_user', user.username, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
 
+    // Sync user registry to Google Drive in background
+    persistUsersToDrive().catch((e) => console.warn('Background Drive user sync error:', e.message));
+
     res.json({ success: true, user, token });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -509,6 +512,10 @@ app.get('/oauth2callback', async (req, res) => {
     const merged = saveTokens(tokens);
     oauth2Client.setCredentials(merged);
     console.log('✅ Google Drive connected. Persistent tokens saved.');
+
+    // Restore and sync contributor accounts with Google Drive
+    restoreUsersFromDrive().catch((e) => console.warn('Drive restore users error:', e.message));
+
     res.redirect('/?auth=success');
   } catch (err) {
     console.error('Error exchanging OAuth code:', err);
@@ -628,6 +635,98 @@ async function getUserPracticeDriveFolder(drive, userFolderId) {
   const newId = created.data.id;
   userDriveFolderCache.set(cacheKey, newId);
   return newId;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud User Registry Sync with Google Drive
+// Ensures accounts survive restarts and redeployments across ephemeral cloud hosts.
+// ---------------------------------------------------------------------------
+async function restoreUsersFromDrive() {
+  try {
+    const drive = getDriveClient();
+    const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
+    if (!drive || !cleanFolderId) return;
+
+    const res = await drive.files.list({
+      q: `'${cleanFolderId}' in parents and name = 'dcs_users_registry.json' and trashed = false`,
+      fields: 'files(id, name, modifiedTime)',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    if (res.data.files && res.data.files.length > 0) {
+      const fileId = res.data.files[0].id;
+      const downloadRes = await drive.files.get(
+        { fileId, alt: 'media', supportsAllDrives: true },
+        { responseType: 'text' }
+      );
+
+      const content = downloadRes.data;
+      if (content) {
+        const cloudUsers = typeof content === 'string' ? JSON.parse(content) : content;
+        if (Array.isArray(cloudUsers) && cloudUsers.length > 0) {
+          userManager.mergeUsers(cloudUsers);
+          console.log(`✅ Restored ${cloudUsers.length} contributor account(s) from Google Drive.`);
+        }
+      }
+    }
+  } catch (err) {
+    // Non-fatal if drive not connected yet
+    console.log('ℹ️ Google Drive user registry restore skipped:', err.message);
+  }
+}
+
+async function persistUsersToDrive() {
+  try {
+    const drive = getDriveClient();
+    const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
+    if (!drive || !cleanFolderId) return;
+
+    const users = userManager.getRawUsers();
+    const content = JSON.stringify(users, null, 2);
+
+    const res = await drive.files.list({
+      q: `'${cleanFolderId}' in parents and name = 'dcs_users_registry.json' and trashed = false`,
+      fields: 'files(id, name)',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    const bufferStream = new Readable();
+    bufferStream.push(content);
+    bufferStream.push(null);
+
+    if (res.data.files && res.data.files.length > 0) {
+      const fileId = res.data.files[0].id;
+      await drive.files.update({
+        fileId,
+        media: {
+          mimeType: 'application/json',
+          body: bufferStream,
+        },
+        supportsAllDrives: true,
+      });
+      console.log('☁️ Synced dcs_users_registry.json to Google Drive.');
+    } else {
+      await drive.files.create({
+        requestBody: {
+          name: 'dcs_users_registry.json',
+          parents: [cleanFolderId],
+          mimeType: 'application/json',
+        },
+        media: {
+          mimeType: 'application/json',
+          body: bufferStream,
+        },
+        supportsAllDrives: true,
+      });
+      console.log('☁️ Created dcs_users_registry.json in Google Drive.');
+    }
+  } catch (err) {
+    console.warn('Could not persist users registry to Google Drive:', err.message);
+  }
 }
 
 function parseAudioFilename(filename, defaultUser) {
@@ -1476,6 +1575,9 @@ app.post('/api/admin/rename-user', requireAdminAuth, async (req, res) => {
       console.warn('Drive rename warning:', dErr.message);
     }
 
+    // Persist registry changes to cloud backup
+    persistUsersToDrive().catch((e) => console.warn('Drive persist rename error:', e.message));
+
     res.json({ success: true, oldUser: normOld, newUser: normNew });
   } catch (err) {
     console.error('POST /api/admin/rename-user error:', err);
@@ -1488,6 +1590,7 @@ app.post('/api/admin/reset-user-pin', requireAdminAuth, (req, res) => {
   try {
     const { username, newPin } = req.body;
     userManager.resetUserPin(username, newPin);
+    persistUsersToDrive().catch((e) => console.warn('Drive persist pin reset error:', e.message));
     res.json({ success: true, username });
   } catch (err) {
     console.error('POST /api/admin/reset-user-pin error:', err);
@@ -1511,6 +1614,14 @@ app.get('/api/status', async (req, res) => {
 
 app.listen(PORT, async () => {
   console.log(`\n🎙️  DCS HCI Audio Collector running at http://localhost:${PORT}\n`);
+
+  // Restore contributor accounts from Google Drive on startup
+  try {
+    await restoreUsersFromDrive();
+  } catch (err) {
+    console.warn(`⚠️  Drive user restore warning: ${err.message}`);
+  }
+
   try {
     const akanQs = await getQuestions('akan');
     console.log(`✅ Loaded ${akanQs.length} questions for Akan`);

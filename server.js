@@ -1216,6 +1216,149 @@ app.get('/api/admin/recordings', requireAdminAuth, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Admin Export Spreadsheet (CSV) (Protected)
+// Exports audio recordings and question transcripts for user(s) as a spreadsheet.
+// Five required columns: audio file name, prompt id, language, audio file, transcript
+// ---------------------------------------------------------------------------
+app.get('/api/admin/export', requireAdminAuth, async (req, res) => {
+  try {
+    const { user, lang, practice } = req.query;
+
+    // 1. Preload question mappings for Akan and Ewe
+    let akanQuestions = [];
+    let eweQuestions = [];
+    try { akanQuestions = await getQuestions('akan'); } catch (e) {
+      console.warn('Export: Could not load Akan questions:', e.message);
+    }
+    try { eweQuestions = await getQuestions('ewe'); } catch (e) {
+      console.warn('Export: Could not load Ewe questions:', e.message);
+    }
+
+    const akanMap = new Map();
+    akanQuestions.forEach((q) => {
+      if (q && q.id) {
+        akanMap.set(q.id.trim().toLowerCase(), q);
+      }
+    });
+
+    const eweMap = new Map();
+    eweQuestions.forEach((q) => {
+      if (q && q.id) {
+        eweMap.set(q.id.trim().toLowerCase(), q);
+      }
+    });
+
+    // 2. Fetch all recordings
+    const { recordings } = await listAllRecordings();
+
+    let filtered = recordings;
+
+    // Filter by user if specified
+    if (user && user !== 'all') {
+      filtered = filtered.filter((r) => r.user.toLowerCase() === user.toLowerCase());
+    }
+
+    // Filter by language if specified
+    if (lang && lang !== 'all') {
+      filtered = filtered.filter((r) => r.lang.toLowerCase() === lang.toLowerCase());
+    }
+
+    // Practice filter: default exclude unless practice=true
+    if (practice !== 'true') {
+      filtered = filtered.filter((r) => !r.isPractice);
+    }
+
+    // Sort cleanly by contributor, then by recording filename
+    filtered.sort((a, b) => {
+      if (a.user.toLowerCase() !== b.user.toLowerCase()) {
+        return a.user.localeCompare(b.user);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    // 3. Helper to escape CSV cell according to RFC 4180
+    function escapeCsvCell(cell) {
+      if (cell === null || cell === undefined) return '';
+      const str = String(cell);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    }
+
+    // Determine host for stream URL fallback
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || `localhost:${PORT}`;
+    const baseUrl = `${protocol}://${host}`;
+
+    // 4. Construct CSV header with exact five columns requested:
+    // audio file name, prompt id, language, audio file, transcript
+    const headerRow = [
+      'audio file name',
+      'prompt id',
+      'language',
+      'audio file',
+      'transcript',
+    ].map(escapeCsvCell).join(',');
+
+    const dataRows = filtered.map((r) => {
+      const audioFileName = r.name || '';
+      const promptId = r.questionId || '';
+      const languageDisplay = (r.lang || '').toLowerCase() === 'ewe' ? 'Ewe' : 'Akan';
+
+      // Audio file link: prefer Drive webViewLink if available, or direct server streaming URL
+      let audioFileLink = '';
+      if (r.webViewLink) {
+        audioFileLink = r.webViewLink;
+      } else if (r.streamUrl) {
+        audioFileLink = `${baseUrl}${r.streamUrl}`;
+      }
+
+      // Transcript lookup
+      const isEwe = (r.lang || '').toLowerCase() === 'ewe';
+      const qMap = isEwe ? eweMap : akanMap;
+      const q = qMap.get((r.questionId || '').trim().toLowerCase());
+
+      let transcript = '';
+      if (r.targetType === 'options') {
+        if (q && q.options && q.options.length > 0) {
+          transcript = q.options.join('\n');
+        } else if (q && q.text) {
+          transcript = q.text;
+        }
+      } else if (r.targetType === 'practice') {
+        transcript = q ? (q.text || (q.options ? q.options.join('\n') : '')) : 'Practice take';
+      } else {
+        // targetType === 'question' or default
+        transcript = q ? q.text : '';
+      }
+
+      return [
+        audioFileName,
+        promptId,
+        languageDisplay,
+        audioFileLink,
+        transcript,
+      ].map(escapeCsvCell).join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headerRow, ...dataRows].join('\r\n');
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const downloadFilename = (user && user !== 'all')
+      ? `recordings_${sanitizeUsername(user)}_${dateStr}.csv`
+      : `recordings_all_${dateStr}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+    return res.send(csvContent);
+  } catch (err) {
+    console.error('GET /api/admin/export error:', err);
+    res.status(500).json({ error: 'Failed to generate export: ' + err.message });
+  }
+});
+
 // Admin Delete Recording (Protected)
 app.delete('/api/admin/recording', requireAdminAuth, async (req, res) => {
   try {

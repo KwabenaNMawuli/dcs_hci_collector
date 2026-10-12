@@ -34,6 +34,7 @@ const filterTrack = document.getElementById('filter-track');
 const checkPractice = document.getElementById('check-practice');
 const searchInput = document.getElementById('admin-search');
 const btnRefresh = document.getElementById('btn-refresh-admin');
+const btnExportCsv = document.getElementById('btn-export-csv');
 
 // Rename modal
 const renameModal = document.getElementById('rename-modal');
@@ -183,6 +184,12 @@ function bindEvents() {
     });
   }
 
+  if (btnExportCsv) {
+    btnExportCsv.addEventListener('click', () => {
+      downloadSpreadsheet(currentFilterUser, currentFilterLang, includePractice);
+    });
+  }
+
   // Modal events
   if (renameModalClose) renameModalClose.addEventListener('click', closeRenameModal);
   if (btnCancelRename) btnCancelRename.addEventListener('click', closeRenameModal);
@@ -281,6 +288,9 @@ function renderUsersTable(users) {
       </td>
       <td>
         <div class="btn-action-group">
+          <button type="button" class="btn-icon-link btn-export-user" data-user="${escapeHtml(u.user)}" title="Export recordings and transcripts as spreadsheet for this contributor">
+            📥 Export
+          </button>
           <button type="button" class="btn-icon-link btn-filter-user" data-user="${escapeHtml(u.user)}" title="Filter recordings for this user">
             🔍 Filter Takes
           </button>
@@ -295,6 +305,12 @@ function renderUsersTable(users) {
     `;
     usersTableBody.appendChild(tr);
   }
+
+  usersTableBody.querySelectorAll('.btn-export-user').forEach(btn => {
+    btn.addEventListener('click', () => {
+      downloadSpreadsheet(btn.dataset.user, 'all', includePractice, btn);
+    });
+  });
 
   usersTableBody.querySelectorAll('.btn-filter-user').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -449,6 +465,80 @@ function filterAndRenderRecordings() {
       }
     });
   });
+}
+
+// ── Spreadsheet Export ─────────────────────────────────────────────────────
+async function downloadSpreadsheet(user = 'all', lang = 'all', practice = false, triggerBtn = null) {
+  const token = getAdminToken();
+  if (!token) {
+    redirectToLogin();
+    return;
+  }
+
+  const btn = triggerBtn || btnExportCsv;
+  const originalText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Exporting…';
+  }
+
+  try {
+    const params = new URLSearchParams({
+      user,
+      lang,
+      practice: practice ? 'true' : 'false',
+      admin_token: token,
+    });
+
+    const res = await fetch(`/api/admin/export?${params.toString()}`, {
+      headers: {
+        'x-admin-token': token,
+      },
+    });
+
+    if (res.status === 401) {
+      redirectToLogin();
+      return;
+    }
+
+    if (!res.ok) {
+      let errMsg = 'Failed to download spreadsheet';
+      try {
+        const j = await res.json();
+        if (j.error) errMsg = j.error;
+      } catch (_) {}
+      throw new Error(errMsg);
+    }
+
+    const blob = await res.blob();
+    let downloadFilename = (user && user !== 'all')
+      ? `recordings_${user}_${new Date().toISOString().slice(0, 10)}.csv`
+      : `recordings_all_${new Date().toISOString().slice(0, 10)}.csv`;
+
+    const disposition = res.headers.get('content-disposition');
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) {
+        downloadFilename = match[1];
+      }
+    }
+
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = downloadFilename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    alert('Spreadsheet export failed: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
 }
 
 // ── Rename User Modal ──────────────────────────────────────────────────────

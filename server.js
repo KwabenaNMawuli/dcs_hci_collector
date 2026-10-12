@@ -16,6 +16,7 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
+const userManager = require('./users-manager');
 
 const PORT = process.env.PORT || 3000;
 
@@ -45,8 +46,32 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// ---------------------------------------------------------------------------
+// Cookie parser middleware (zero external dependency)
+// ---------------------------------------------------------------------------
+function cookieParserMiddleware(req, res, next) {
+  req.cookies = {};
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    cookieHeader.split(';').forEach((c) => {
+      const parts = c.trim().split('=');
+      const key = parts[0];
+      const val = parts.slice(1).join('=');
+      if (key) {
+        try {
+          req.cookies[key.trim()] = decodeURIComponent(val);
+        } catch (_) {
+          req.cookies[key.trim()] = val;
+        }
+      }
+    });
+  }
+  next();
+}
+
 const app = express();
 app.use(express.json());
+app.use(cookieParserMiddleware);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve admin dashboard at /admin and /admin.html
@@ -57,6 +82,90 @@ app.get(['/admin', '/admin.html'], (_req, res) => {
 // Serve admin login page at /login and /login.html
 app.get(['/login', '/login.html'], (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Serve contributor sign-in page at /user-login and /user-login.html
+app.get(['/user-login', '/user-login.html'], (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'user-login.html'));
+});
+
+// ---------------------------------------------------------------------------
+// Contributor Authentication & Session Tracking
+// ---------------------------------------------------------------------------
+const activeContributorSessions = new Map(); // token -> username
+
+function getAuthenticatedContributor(req) {
+  const token = req.cookies['dcs_contributor_token'] || req.headers['x-contributor-token'];
+  const userCookie = req.cookies['dcs_contributor_user'] || req.headers['x-contributor-user'];
+
+  if (token && activeContributorSessions.has(token)) {
+    return activeContributorSessions.get(token);
+  }
+  if (userCookie) {
+    const verified = userManager.getUser(userCookie);
+    if (verified) return verified.username;
+  }
+  return null;
+}
+
+// Contributor API Routes
+app.get('/api/users/list', (_req, res) => {
+  res.json({ users: userManager.listUsers() });
+});
+
+app.post('/api/users/register', (req, res) => {
+  try {
+    const { username, displayName, pin } = req.body;
+    const user = userManager.registerUser(username, displayName, pin);
+    const token = crypto.randomBytes(32).toString('hex');
+    activeContributorSessions.set(token, user.username);
+
+    // Set persistent 90-day cookies
+    res.cookie('dcs_contributor_token', token, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
+    res.cookie('dcs_contributor_user', user.username, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
+
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/users/login', (req, res) => {
+  try {
+    const { username, pin } = req.body;
+    const user = userManager.verifyUser(username, pin);
+    const token = crypto.randomBytes(32).toString('hex');
+    activeContributorSessions.set(token, user.username);
+
+    // Set persistent 90-day cookies
+    res.cookie('dcs_contributor_token', token, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
+    res.cookie('dcs_contributor_user', user.username, { maxAge: 90 * 24 * 3600 * 1000, httpOnly: false, sameSite: 'lax', path: '/' });
+
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.get('/api/users/me', (req, res) => {
+  const username = getAuthenticatedContributor(req);
+  if (username) {
+    const user = userManager.getUser(username);
+    if (user) {
+      return res.json({ authenticated: true, user });
+    }
+  }
+  return res.json({ authenticated: false });
+});
+
+app.post('/api/users/logout', (req, res) => {
+  const token = req.cookies['dcs_contributor_token'] || req.headers['x-contributor-token'];
+  if (token) {
+    activeContributorSessions.delete(token);
+  }
+  res.clearCookie('dcs_contributor_token', { path: '/' });
+  res.clearCookie('dcs_contributor_user', { path: '/' });
+  res.json({ success: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -534,6 +643,12 @@ function parseAudioFilename(filename, defaultUser) {
 async function listAllRecordings() {
   const recordings = [];
   const usersSet = new Set();
+
+  // 0. Include all registered contributors
+  for (const regUser of userManager.listUsers()) {
+    usersSet.add(regUser.username);
+  }
+
   const drive = (() => {
     try { return getDriveClient(); } catch (_) { return null; }
   })();
@@ -739,7 +854,12 @@ app.get('/api/practice', async (req, res) => {
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
     const { questionId, targetType, lang, replace, user } = req.body;
-    const normUser = sanitizeUsername(user);
+    const authUser = getAuthenticatedContributor(req);
+    const normUser = userManager.sanitizeUsername(authUser || user);
+
+    if (!normUser || normUser === 'default_user') {
+      return res.status(401).json({ error: 'Please sign in with your contributor account before uploading.' });
+    }
 
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
@@ -838,7 +958,12 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
 app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
   try {
     const { questionId, lang, user } = req.body;
-    const normUser = sanitizeUsername(user);
+    const authUser = getAuthenticatedContributor(req);
+    const normUser = userManager.sanitizeUsername(authUser || user);
+
+    if (!normUser || normUser === 'default_user') {
+      return res.status(401).json({ error: 'Please sign in with your contributor account before uploading.' });
+    }
 
     if (!questionId || !/^[A-Za-z0-9]+$/.test(questionId)) {
       return res.status(400).json({ error: 'A valid questionId is required' });
@@ -1140,6 +1265,10 @@ app.post('/api/admin/rename-user', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ error: 'New username must be different' });
     }
 
+    try {
+      userManager.renameUserInRegistry(normOld, normNew);
+    } catch (_) {}
+
     // Rename local directory
     const oldDir = path.join(UPLOADS_DIR, normOld);
     const newDir = path.join(UPLOADS_DIR, normNew);
@@ -1186,6 +1315,18 @@ app.post('/api/admin/rename-user', requireAdminAuth, async (req, res) => {
   } catch (err) {
     console.error('POST /api/admin/rename-user error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Reset User PIN (Protected)
+app.post('/api/admin/reset-user-pin', requireAdminAuth, (req, res) => {
+  try {
+    const { username, newPin } = req.body;
+    userManager.resetUserPin(username, newPin);
+    res.json({ success: true, username });
+  } catch (err) {
+    console.error('POST /api/admin/reset-user-pin error:', err);
+    res.status(400).json({ error: err.message });
   }
 });
 

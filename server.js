@@ -54,6 +54,11 @@ app.get(['/admin', '/admin.html'], (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
+// Serve admin login page at /login and /login.html
+app.get(['/login', '/login.html'], (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
 // ---------------------------------------------------------------------------
 // Multer setup
 // ---------------------------------------------------------------------------

@@ -17,11 +17,6 @@ let includePractice = false;
 let searchQuery = '';
 
 // ── DOM References ─────────────────────────────────────────────────────────
-const authWall = document.getElementById('admin-auth-wall');
-const loginForm = document.getElementById('admin-login-form');
-const inputPassword = document.getElementById('admin-password-input');
-const btnLogin = document.getElementById('btn-admin-login');
-const loginError = document.getElementById('admin-login-error');
 const btnLogout = document.getElementById('btn-logout-admin');
 
 const kpiAkanQs = document.getElementById('kpi-akan-questions');
@@ -66,7 +61,7 @@ if (document.readyState === 'loading') {
 }
 
 function getAdminToken() {
-  return sessionStorage.getItem('dcs_admin_token') || '';
+  return sessionStorage.getItem('dcs_admin_token') || localStorage.getItem('dcs_admin_token') || '';
 }
 
 function getAdminHeaders() {
@@ -74,6 +69,12 @@ function getAdminHeaders() {
     'Content-Type': 'application/json',
     'x-admin-token': getAdminToken(),
   };
+}
+
+function redirectToLogin() {
+  sessionStorage.removeItem('dcs_admin_token');
+  localStorage.removeItem('dcs_admin_token');
+  window.location.replace('/login');
 }
 
 async function safeFetchJson(url, options = {}) {
@@ -109,22 +110,10 @@ async function safeFetchJson(url, options = {}) {
   return { res, data };
 }
 
-function showAuthWall() {
-  authWall.hidden = false;
-  loginError.hidden = true;
-  loginError.textContent = '';
-  inputPassword.value = '';
-  inputPassword.focus();
-}
-
-function hideAuthWall() {
-  authWall.hidden = true;
-}
-
 async function checkAdminSession() {
   const token = getAdminToken();
   if (!token) {
-    showAuthWall();
+    redirectToLogin();
     return;
   }
 
@@ -133,62 +122,16 @@ async function checkAdminSession() {
       headers: getAdminHeaders(),
     });
     if (data && data.authenticated) {
-      hideAuthWall();
       await loadAdminData();
     } else {
-      sessionStorage.removeItem('dcs_admin_token');
-      showAuthWall();
+      redirectToLogin();
     }
   } catch (err) {
-    showAuthWall();
+    redirectToLogin();
   }
 }
 
 function bindEvents() {
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const password = (inputPassword ? inputPassword.value : '').trim();
-      if (!password) return;
-
-      if (btnLogin) {
-        btnLogin.disabled = true;
-        btnLogin.textContent = 'Verifying…';
-      }
-      if (loginError) loginError.hidden = true;
-
-      try {
-        const { res, data } = await safeFetchJson('/api/admin/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password }),
-        });
-
-        if (!res.ok) {
-          throw new Error((data && data.error) || 'Incorrect password');
-        }
-
-        sessionStorage.setItem('dcs_admin_token', data.token);
-        hideAuthWall();
-        await loadAdminData();
-      } catch (err) {
-        if (loginError) {
-          loginError.hidden = false;
-          loginError.textContent = `❌ ${err.message}`;
-        }
-        if (inputPassword) {
-          inputPassword.focus();
-          inputPassword.select();
-        }
-      } finally {
-        if (btnLogin) {
-          btnLogin.disabled = false;
-          btnLogin.textContent = 'Unlock 🔓';
-        }
-      }
-    });
-  }
-
   if (btnLogout) {
     btnLogout.addEventListener('click', async () => {
       try {
@@ -197,8 +140,7 @@ function bindEvents() {
           headers: getAdminHeaders(),
         });
       } catch (_) {}
-      sessionStorage.removeItem('dcs_admin_token');
-      showAuthWall();
+      redirectToLogin();
     });
   }
 
@@ -274,7 +216,7 @@ async function loadAdminData() {
     });
 
     if (overviewRes.status === 401) {
-      showAuthWall();
+      redirectToLogin();
       return;
     }
 
@@ -291,7 +233,7 @@ async function loadAdminData() {
     });
 
     if (recordingsRes.status === 401) {
-      showAuthWall();
+      redirectToLogin();
       return;
     }
 

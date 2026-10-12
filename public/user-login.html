@@ -71,7 +71,7 @@
   <div class="auth-wall-card" style="width:100%;max-width:440px;margin:20px;">
     <div class="auth-wall-icon">🎙️</div>
     <h2 style="margin-bottom:4px;">Audio Contributor Profile</h2>
-    <p class="auth-wall-sub">Select or create your contributor account so your recordings are neatly stored in your dedicated folder.</p>
+    <p class="auth-wall-sub">Enter your contributor username and passcode to access your recordings, or create a new profile.</p>
 
     <!-- Tabs: Sign In vs Register -->
     <div class="auth-tabs" role="tablist">
@@ -82,15 +82,15 @@
     <!-- ── 1. Sign In Form ──────────────────────────────────────── -->
     <form id="form-contributor-login">
       <div class="form-group">
-        <label for="select-login-user">Choose Your Name / ID:</label>
-        <select id="select-login-user" class="form-control">
-          <option value="">— Select registered contributor —</option>
-        </select>
-      </div>
-
-      <div class="form-group" id="group-manual-username" style="display:none;">
-        <label for="input-login-username">Or Enter Username:</label>
-        <input type="text" id="input-login-username" class="form-control" placeholder="e.g. Kwabena, Ama" autocomplete="username" />
+        <label for="input-login-username">Contributor Username / ID:</label>
+        <input
+          type="text"
+          id="input-login-username"
+          class="form-control"
+          placeholder="e.g. Kwabena, Ama"
+          required
+          autocomplete="username"
+        />
       </div>
 
       <div class="form-group">

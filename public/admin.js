@@ -53,11 +53,17 @@ const badgeDrive = document.getElementById('badge-drive-connected');
 const btnAuthDrive = document.getElementById('btn-auth-drive');
 
 // ── Init ───────────────────────────────────────────────────────────────────
-(async function initAdmin() {
+function initAdmin() {
   bindEvents();
-  await checkAuthStatus();
-  await checkAdminSession();
-})();
+  checkAuthStatus();
+  checkAdminSession();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAdmin);
+} else {
+  initAdmin();
+}
 
 function getAdminToken() {
   return sessionStorage.getItem('dcs_admin_token') || '';
@@ -139,82 +145,106 @@ async function checkAdminSession() {
 }
 
 function bindEvents() {
-  loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const password = (inputPassword.value || '').trim();
-    if (!password) return;
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = (inputPassword ? inputPassword.value : '').trim();
+      if (!password) return;
 
-    btnLogin.disabled = true;
-    btnLogin.textContent = 'Verifying…';
-    loginError.hidden = true;
-
-    try {
-      const { res, data } = await safeFetchJson('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-
-      if (!res.ok) {
-        throw new Error((data && data.error) || 'Incorrect password');
+      if (btnLogin) {
+        btnLogin.disabled = true;
+        btnLogin.textContent = 'Verifying…';
       }
+      if (loginError) loginError.hidden = true;
 
-      sessionStorage.setItem('dcs_admin_token', data.token);
-      hideAuthWall();
-      await loadAdminData();
-    } catch (err) {
-      loginError.hidden = false;
-      loginError.textContent = `❌ ${err.message}`;
-      inputPassword.focus();
-      inputPassword.select();
-    } finally {
-      btnLogin.disabled = false;
-      btnLogin.textContent = 'Unlock 🔓';
-    }
-  });
+      try {
+        const { res, data } = await safeFetchJson('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
 
-  btnLogout.addEventListener('click', async () => {
-    try {
-      await fetch('/api/admin/logout', {
-        method: 'POST',
-        headers: getAdminHeaders(),
-      });
-    } catch (_) {}
-    sessionStorage.removeItem('dcs_admin_token');
-    showAuthWall();
-  });
+        if (!res.ok) {
+          throw new Error((data && data.error) || 'Incorrect password');
+        }
 
-  btnRefresh.addEventListener('click', loadAdminData);
+        sessionStorage.setItem('dcs_admin_token', data.token);
+        hideAuthWall();
+        await loadAdminData();
+      } catch (err) {
+        if (loginError) {
+          loginError.hidden = false;
+          loginError.textContent = `❌ ${err.message}`;
+        }
+        if (inputPassword) {
+          inputPassword.focus();
+          inputPassword.select();
+        }
+      } finally {
+        if (btnLogin) {
+          btnLogin.disabled = false;
+          btnLogin.textContent = 'Unlock 🔓';
+        }
+      }
+    });
+  }
 
-  filterUser.addEventListener('change', () => {
-    currentFilterUser = filterUser.value;
-    filterAndRenderRecordings();
-  });
+  if (btnLogout) {
+    btnLogout.addEventListener('click', async () => {
+      try {
+        await fetch('/api/admin/logout', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+        });
+      } catch (_) {}
+      sessionStorage.removeItem('dcs_admin_token');
+      showAuthWall();
+    });
+  }
 
-  filterLang.addEventListener('change', () => {
-    currentFilterLang = filterLang.value;
-    filterAndRenderRecordings();
-  });
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', loadAdminData);
+  }
 
-  filterTrack.addEventListener('change', () => {
-    currentFilterTrack = filterTrack.value;
-    filterAndRenderRecordings();
-  });
+  if (filterUser) {
+    filterUser.addEventListener('change', () => {
+      currentFilterUser = filterUser.value;
+      filterAndRenderRecordings();
+    });
+  }
 
-  checkPractice.addEventListener('change', () => {
-    includePractice = checkPractice.checked;
-    filterAndRenderRecordings();
-  });
+  if (filterLang) {
+    filterLang.addEventListener('change', () => {
+      currentFilterLang = filterLang.value;
+      filterAndRenderRecordings();
+    });
+  }
 
-  searchInput.addEventListener('input', () => {
-    searchQuery = searchInput.value.trim().toLowerCase();
-    filterAndRenderRecordings();
-  });
+  if (filterTrack) {
+    filterTrack.addEventListener('change', () => {
+      currentFilterTrack = filterTrack.value;
+      filterAndRenderRecordings();
+    });
+  }
+
+  if (checkPractice) {
+    checkPractice.addEventListener('change', () => {
+      includePractice = checkPractice.checked;
+      filterAndRenderRecordings();
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      searchQuery = searchInput.value.trim().toLowerCase();
+      filterAndRenderRecordings();
+    });
+  }
 
   // Modal events
-  renameModalClose.addEventListener('click', closeRenameModal);
-  btnCancelRename.addEventListener('click', closeRenameModal);
-  btnConfirmRename.addEventListener('click', handleRenameSubmit);
+  if (renameModalClose) renameModalClose.addEventListener('click', closeRenameModal);
+  if (btnCancelRename) btnCancelRename.addEventListener('click', closeRenameModal);
+  if (btnConfirmRename) btnConfirmRename.addEventListener('click', handleRenameSubmit);
 }
 
 async function checkAuthStatus() {

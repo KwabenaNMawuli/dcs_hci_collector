@@ -108,8 +108,8 @@ function getAuthenticatedContributor(req) {
   return null;
 }
 
-// Contributor API Routes
-app.get('/api/users/list', (_req, res) => {
+// Protected Admin API to list contributors (prevents public scraping of user accounts)
+app.get('/api/users/list', requireAdminAuth, (_req, res) => {
   res.json({ users: userManager.listUsers() });
 });
 

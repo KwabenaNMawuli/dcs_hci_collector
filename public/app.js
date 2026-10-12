@@ -69,7 +69,8 @@ const badgeDriveConnected = document.getElementById('badge-drive-connected');
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
-  initUser();
+  const authenticated = await initUser();
+  if (!authenticated) return;
   await checkAuthStatus();
   bindLangButtons();
   setLanguageUI(currentLang);
@@ -85,51 +86,43 @@ if (document.readyState === 'loading') {
 }
 
 // ── User Identity ──────────────────────────────────────────────────────────
-function initUser() {
+async function initUser() {
   const nameEl = document.getElementById('current-user-name');
-  if (nameEl) nameEl.textContent = currentUser;
+  const btnSignout = document.getElementById('btn-user-signout');
 
-  const btnSelect = document.getElementById('btn-user-select');
-  const userModal = document.getElementById('user-modal');
-  const userModalClose = document.getElementById('user-modal-close-btn');
-  const btnSaveUser = document.getElementById('btn-save-user');
-  const inputUser = document.getElementById('input-username');
-
-  function openUserModal() {
-    inputUser.value = currentUser === 'default_user' ? '' : currentUser;
-    userModal.hidden = false;
-    inputUser.focus();
-  }
-
-  function closeUserModal() {
-    userModal.hidden = true;
-  }
-
-  function saveUser() {
-    const raw = inputUser.value.trim().replace(/[^a-zA-Z0-9_\-\s]/g, '');
-    if (raw) {
-      currentUser = raw.replace(/\s+/g, '_');
-    } else {
-      currentUser = 'default_user';
+  // Verify contributor authentication with server
+  try {
+    const res = await fetch('/api/users/me');
+    const data = await res.json();
+    if (!data || !data.authenticated || !data.user) {
+      window.location.replace('/user-login.html');
+      return false;
     }
+    currentUser = data.user.username;
     localStorage.setItem('dcs_audio_user', currentUser);
+    if (nameEl) nameEl.textContent = data.user.displayName || currentUser;
+  } catch (err) {
+    const stored = localStorage.getItem('dcs_audio_user');
+    if (!stored || stored === 'default_user') {
+      window.location.replace('/user-login.html');
+      return false;
+    }
+    currentUser = stored;
     if (nameEl) nameEl.textContent = currentUser;
-    closeUserModal();
   }
 
-  if (btnSelect) btnSelect.addEventListener('click', openUserModal);
-  if (userModalClose) userModalClose.addEventListener('click', closeUserModal);
-  if (btnSaveUser) btnSaveUser.addEventListener('click', saveUser);
-  if (inputUser) {
-    inputUser.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') saveUser();
+  if (btnSignout) {
+    btnSignout.addEventListener('click', async () => {
+      try {
+        await fetch('/api/users/logout', { method: 'POST' });
+      } catch (_) {}
+      localStorage.removeItem('dcs_audio_user');
+      sessionStorage.removeItem('dcs_contributor_token');
+      window.location.replace('/user-login.html');
     });
   }
 
-  // Prompt contributor on first visit
-  if (!localStorage.getItem('dcs_audio_user')) {
-    setTimeout(openUserModal, 600);
-  }
+  return true;
 }
 
 async function checkAuthStatus() {

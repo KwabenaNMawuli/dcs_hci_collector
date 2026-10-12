@@ -103,21 +103,21 @@ langBtns.forEach((b) => {
   b.addEventListener('click', () => setLang(b.dataset.lang));
 });
 
-btnNew.addEventListener('click', () => { stopRecording(); btnNext.disabled = false; load(); });
-btnPrev.addEventListener('click', () => { if (index > 0) { index--; show(); } });
-btnNext.addEventListener('click', () => {
+if (btnNew) btnNew.addEventListener('click', () => { stopRecording(); if (btnNext) btnNext.disabled = false; load(); });
+if (btnPrev) btnPrev.addEventListener('click', () => { if (index > 0) { index--; show(); } });
+if (btnNext) btnNext.addEventListener('click', () => {
   if (index < questions.length - 1) { index++; show(); } else { showDone(); }
 });
 
 // ── Recording (local only) ─────────────────────────────────────────────────
-btnRecord.addEventListener('click', startRecording);
-btnStop.addEventListener('click', stopRecording);
-btnPlay.addEventListener('click', () => {
-  if (!audioEl.src) return;
+if (btnRecord) btnRecord.addEventListener('click', startRecording);
+if (btnStop) btnStop.addEventListener('click', stopRecording);
+if (btnPlay) btnPlay.addEventListener('click', () => {
+  if (!audioEl || !audioEl.src) return;
   if (audioEl.paused) { audioEl.play(); btnPlay.innerHTML = '<span class="btn-icon">⏸</span> Pause'; }
   else { audioEl.pause(); btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play'; }
 });
-audioEl.addEventListener('ended', () => { btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play'; });
+if (audioEl) audioEl.addEventListener('ended', () => { if (btnPlay) btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play'; });
 
 function getMimeType() {
   return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
@@ -199,34 +199,36 @@ function resetRecording() {
   clearWaveform();
 }
 
-btnSave.addEventListener('click', async () => {
-  const q = questions[index];
-  if (!takeBlob || !q) return;
+if (btnSave) {
+  btnSave.addEventListener('click', async () => {
+    const q = questions[index];
+    if (!takeBlob || !q) return;
 
-  const currentUser = localStorage.getItem('dcs_audio_user') || 'default_user';
+    const currentUser = localStorage.getItem('dcs_audio_user') || 'default_user';
 
-  btnSave.disabled = true;
-  saveStatus.className = 'upload-status';
-  saveStatus.textContent = '⏳ Saving MP3…';
+    btnSave.disabled = true;
+    saveStatus.className = 'upload-status';
+    saveStatus.textContent = '⏳ Saving MP3…';
 
-  const form = new FormData();
-  form.append('audio', takeBlob, `practice_${q.id}_${lang}.mp3`);
-  form.append('questionId', q.id);
-  form.append('lang', lang);
-  form.append('user', currentUser);
+    const form = new FormData();
+    form.append('audio', takeBlob, `practice_${q.id}_${lang}.mp3`);
+    form.append('questionId', q.id);
+    form.append('lang', lang);
+    form.append('user', currentUser);
 
-  try {
-    const res = await fetch('/api/practice-upload', { method: 'POST', body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-    saveStatus.className = 'upload-status success';
-    saveStatus.textContent = `✅ Saved to ${currentUser}'s practice folder as ${data.filename}`;
-  } catch (err) {
-    saveStatus.className = 'upload-status error';
-    saveStatus.textContent = `❌ Save failed: ${err.message}`;
-    btnSave.disabled = false;
-  }
-});
+    try {
+      const res = await fetch('/api/practice-upload', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      saveStatus.className = 'upload-status success';
+      saveStatus.textContent = `✅ Saved to ${currentUser}'s practice folder as ${data.filename}`;
+    } catch (err) {
+      saveStatus.className = 'upload-status error';
+      saveStatus.textContent = `❌ Save failed: ${err.message}`;
+      btnSave.disabled = false;
+    }
+  });
+}
 
 function drawWaveform() {
   const ctx = canvas.getContext('2d');

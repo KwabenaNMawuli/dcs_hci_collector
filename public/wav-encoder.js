@@ -176,3 +176,4 @@
   window.WavRecorder = WavRecorder;
 
 })(typeof window !== 'undefined' ? window : this);
+

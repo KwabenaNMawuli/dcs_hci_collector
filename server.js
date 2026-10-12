@@ -173,12 +173,24 @@ app.post('/api/users/logout', (req, res) => {
 // ---------------------------------------------------------------------------
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith('audio/')) {
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = (file.originalname || '').toLowerCase();
+    if (
+      mime.startsWith('audio/') ||
+      mime === 'video/mp4' ||
+      mime === 'video/webm' ||
+      mime === 'application/octet-stream' ||
+      name.endsWith('.wav') ||
+      name.endsWith('.mp3') ||
+      name.endsWith('.webm') ||
+      name.endsWith('.m4a') ||
+      name.endsWith('.ogg')
+    ) {
       cb(null, true);
     } else {
-      cb(new Error('Only audio files are accepted'), false);
+      cb(new Error('Only audio recordings are accepted'), false);
     }
   },
 });
@@ -346,7 +358,7 @@ async function getQuestions(lang = 'akan') {
 // ---------------------------------------------------------------------------
 // List Drive files in target folder
 // ---------------------------------------------------------------------------
-const EXTS = ['.webm', '.mp3', '.wav', '.ogg', '.m4a'];
+const EXTS = ['.wav', '.mp3', '.webm', '.ogg', '.m4a'];
 
 async function listDriveFiles() {
   const drive = getDriveClient();
@@ -479,7 +491,6 @@ app.get('/auth/google', (req, res) => {
     prompt: 'consent',
     scope: [
       'https://www.googleapis.com/auth/drive',
-      'https://www.googleapis.com/auth/drive.file',
     ],
   });
 
@@ -552,16 +563,19 @@ async function getUserDriveFolder(drive, parentId, user) {
     return userDriveFolderCache.get(cacheKey);
   }
 
+  // Check for existing folder matching either User_<username> or exact <username>
   const res = await drive.files.list({
-    q: `'${parentId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    q: `'${parentId}' in parents and (name = '${folderName}' or name = '${normUser}') and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id, name)',
-    pageSize: 1,
+    pageSize: 10,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   });
 
   if (res.data.files && res.data.files.length > 0) {
-    const id = res.data.files[0].id;
+    // Prefer exact contributor folder if present, otherwise User_contributor
+    const exact = res.data.files.find((f) => f.name.toLowerCase() === normUser.toLowerCase());
+    const id = exact ? exact.id : res.data.files[0].id;
     userDriveFolderCache.set(cacheKey, id);
     return id;
   }
@@ -871,10 +885,9 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const typeSuffix = targetType === 'options' ? '_options' : '_question';
 
-    // MP3 is standard format; fallback to original extension if needed
-    const ext = (req.file.mimetype.includes('mpeg') || req.file.mimetype.includes('mp3'))
-      ? '.mp3'
-      : (path.extname(req.file.originalname || '') || '.mp3');
+    // Use uploaded file extension (prioritizing .wav)
+    const originalExt = path.extname(req.file.originalname || '').toLowerCase();
+    const ext = originalExt && EXTS.includes(originalExt) ? originalExt : '.wav';
 
     const filename = `${questionId}${typeSuffix}_${normLang}${ext}`;
 
@@ -925,14 +938,18 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
+    const uploadMime = (req.file.mimetype && req.file.mimetype.startsWith('audio/'))
+      ? req.file.mimetype
+      : (ext === '.wav' ? 'audio/wav' : 'audio/mpeg');
+
     const driveRes = await drive.files.create({
       requestBody: {
         name: filename,
         parents: [userFolderId],
-        mimeType: req.file.mimetype || 'audio/mpeg',
+        mimeType: uploadMime,
       },
       media: {
-        mimeType: req.file.mimetype || 'audio/mpeg',
+        mimeType: uploadMime,
         body: bufferStream,
       },
       fields: 'id, name, webViewLink',
@@ -973,9 +990,8 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
     }
 
     const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
-    const ext = (req.file.mimetype.includes('mpeg') || req.file.mimetype.includes('mp3'))
-      ? '.mp3'
-      : (path.extname(req.file.originalname || '') || '.mp3');
+    const originalExt = path.extname(req.file.originalname || '').toLowerCase();
+    const ext = originalExt && EXTS.includes(originalExt) ? originalExt : '.wav';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `practice_${questionId}_${normLang}_${stamp}${ext}`;
 
@@ -998,14 +1014,18 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
+    const uploadMime = (req.file.mimetype && req.file.mimetype.startsWith('audio/'))
+      ? req.file.mimetype
+      : (ext === '.wav' ? 'audio/wav' : 'audio/mpeg');
+
     const driveRes = await drive.files.create({
       requestBody: {
         name: filename,
         parents: [practiceFolderId],
-        mimeType: req.file.mimetype || 'audio/mpeg',
+        mimeType: uploadMime,
       },
       media: {
-        mimeType: req.file.mimetype || 'audio/mpeg',
+        mimeType: uploadMime,
         body: bufferStream,
       },
       fields: 'id, name',
@@ -1101,7 +1121,9 @@ app.get('/api/audio/:user/:filename', async (req, res) => {
     const userPath = path.join(UPLOADS_DIR, normUser, filename);
     const rootPath = path.join(UPLOADS_DIR, filename);
 
-    const mime = filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/webm';
+    const mime = filename.endsWith('.wav')
+      ? 'audio/wav'
+      : (filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/webm');
 
     if (fs.existsSync(userPath)) {
       res.setHeader('Content-Type', mime);

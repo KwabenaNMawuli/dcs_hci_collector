@@ -10,8 +10,7 @@ let lang      = localStorage.getItem('dcs_audio_lang') || 'akan';
 let questions = [];
 let index     = 0;
 
-let mediaRecorder = null;
-let chunks        = [];
+let wavRecorder   = null;
 let micStream     = null;
 let audioCtx      = null;
 let analyser      = null;
@@ -119,11 +118,6 @@ if (btnPlay) btnPlay.addEventListener('click', () => {
 });
 if (audioEl) audioEl.addEventListener('ended', () => { if (btnPlay) btnPlay.innerHTML = '<span class="btn-icon">▶</span> Play'; });
 
-function getMimeType() {
-  return ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
-    .find((t) => MediaRecorder.isTypeSupported(t)) || '';
-}
-
 async function startRecording() {
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -132,35 +126,22 @@ async function startRecording() {
     return;
   }
 
-  audioCtx = new AudioContext();
+  const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AudioCtxClass();
+  if (audioCtx.state === 'suspended') {
+    try { await audioCtx.resume(); } catch (_) {}
+  }
+
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 1024;
   audioCtx.createMediaStreamSource(micStream).connect(analyser);
   drawWaveform();
 
-  chunks = [];
-  const mimeType = getMimeType();
-  mediaRecorder = new MediaRecorder(micStream, mimeType ? { mimeType } : {});
-  mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) chunks.push(e.data); });
-  mediaRecorder.addEventListener('stop', async () => {
-    const rawBlob = new Blob(chunks, { type: mimeType || 'audio/webm' });
-    saveStatus.textContent = '⚡ Converting to MP3…';
-    try {
-      if (typeof window.audioBlobToMp3 === 'function') {
-        takeBlob = await window.audioBlobToMp3(rawBlob, 128);
-      } else {
-        takeBlob = rawBlob;
-      }
-    } catch (_) {
-      takeBlob = rawBlob;
-    }
-    audioEl.src = URL.createObjectURL(takeBlob);
-    btnPlay.disabled = false;
-    btnSave.disabled = false;
-    saveStatus.textContent = '';
-  });
-  mediaRecorder.start(250);
+  takeBlob = null;
+  wavRecorder = new window.WavRecorder();
+  wavRecorder.start(micStream);
 
+  saveStatus.textContent = '';
   seconds = 0;
   timerEl.textContent = '00:00';
   timerInterval = setInterval(() => {
@@ -177,9 +158,30 @@ async function startRecording() {
 function stopRecording() {
   clearInterval(timerInterval);
   cancelAnimationFrame(animFrameId);
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; analyser = null; }
+
+  if (wavRecorder) {
+    try {
+      takeBlob = wavRecorder.stop();
+      if (audioEl) audioEl.src = URL.createObjectURL(takeBlob);
+      if (btnPlay) btnPlay.disabled = false;
+      if (btnSave) btnSave.disabled = false;
+    } catch (e) {
+      console.error('Practice WAV stop error:', e);
+    }
+    wavRecorder = null;
+  }
+
+  if (micStream) {
+    micStream.getTracks().forEach((t) => t.stop());
+    micStream = null;
+  }
+
+  if (audioCtx) {
+    try { audioCtx.close(); } catch (_) {}
+    audioCtx = null;
+    analyser = null;
+  }
+
   btnRecord.disabled = false;
   btnRecord.classList.remove('recording');
   btnStop.disabled = true;
@@ -187,7 +189,6 @@ function stopRecording() {
 
 function resetRecording() {
   stopRecording();
-  chunks = [];
   audioEl.pause();
   audioEl.removeAttribute('src');
   btnPlay.disabled = true;
@@ -208,10 +209,10 @@ if (btnSave) {
 
     btnSave.disabled = true;
     saveStatus.className = 'upload-status';
-    saveStatus.textContent = '⏳ Saving MP3…';
+    saveStatus.textContent = '⏳ Saving WAV…';
 
     const form = new FormData();
-    form.append('audio', takeBlob, `practice_${q.id}_${lang}.mp3`);
+    form.append('audio', takeBlob, `practice_${q.id}_${lang}.wav`);
     form.append('questionId', q.id);
     form.append('lang', lang);
     form.append('user', currentUser);

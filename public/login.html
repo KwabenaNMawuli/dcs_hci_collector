@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Login — DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body style="margin:0;min-height:100vh;background:#0f172a;display:flex;align-items:center;justify-content:center;">
+
+  <div class="auth-wall-card" style="width:100%;max-width:440px;margin:20px;">
+    <div class="auth-wall-icon">🔒</div>
+    <h2>Administrator Login</h2>
+    <p class="auth-wall-sub">Please enter the administrator passcode to access the management portal and recordings dashboard.</p>
+    
+    <form id="admin-login-form">
+      <div class="auth-input-group">
+        <input
+          type="password"
+          id="admin-password-input"
+          placeholder="Enter admin password…"
+          required
+          autofocus
+          autocomplete="current-password"
+        />
+        <button type="submit" id="btn-admin-login" class="btn btn-record">
+          Login 🔓
+        </button>
+      </div>
+      <div id="admin-login-error" class="login-error-msg" hidden></div>
+    </form>
+
+    <div class="auth-wall-footer">
+      <a href="/" class="auth-wall-back">← Return to Questionnaire</a>
+    </div>
+  </div>
+
+  <script src="login.js"></script>
+</body>
+</html>

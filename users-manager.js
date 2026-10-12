@@ -210,6 +210,46 @@ function renameUserInRegistry(oldRaw, newRaw) {
   return true;
 }
 
+/**
+ * Return raw users including PIN hashes for secure cloud sync/backup.
+ */
+function getRawUsers() {
+  return loadUsers();
+}
+
+/**
+ * Merge cloud-synced users into local registry without losing updates.
+ * @param {Array} cloudUsers
+ */
+function mergeUsers(cloudUsers) {
+  if (!Array.isArray(cloudUsers)) return loadUsers();
+  const local = loadUsers();
+  const map = new Map();
+  local.forEach((u) => {
+    if (u && u.username) map.set(u.username.toLowerCase(), u);
+  });
+
+  cloudUsers.forEach((u) => {
+    if (u && u.username) {
+      const key = u.username.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, u);
+      } else {
+        const existing = map.get(key);
+        const cloudTime = new Date(u.lastActive || u.createdAt || 0).getTime();
+        const localTime = new Date(existing.lastActive || existing.createdAt || 0).getTime();
+        if (cloudTime > localTime) {
+          map.set(key, { ...existing, ...u });
+        }
+      }
+    }
+  });
+
+  const merged = Array.from(map.values());
+  saveUsers(merged);
+  return merged;
+}
+
 module.exports = {
   sanitizeUsername,
   registerUser,
@@ -218,4 +258,6 @@ module.exports = {
   getUser,
   resetUserPin,
   renameUserInRegistry,
+  getRawUsers,
+  mergeUsers,
 };

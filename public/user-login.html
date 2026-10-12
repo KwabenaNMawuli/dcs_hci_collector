@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contributor Sign In — DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+  <style>
+    .auth-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: 8px;
+    }
+    .auth-tab-btn {
+      flex: 1;
+      padding: 10px 14px;
+      border: none;
+      background: transparent;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #64748b;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s ease;
+    }
+    .auth-tab-btn.active {
+      background: #ffffff;
+      color: #0f172a;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .form-group {
+      margin-bottom: 14px;
+      text-align: left;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 5px;
+    }
+    .form-control {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+    }
+    .form-control:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
+    }
+    .btn-submit-full {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body style="margin:0;min-height:100vh;background:#0f172a;display:flex;align-items:center;justify-content:center;">
+
+  <div class="auth-wall-card" style="width:100%;max-width:440px;margin:20px;">
+    <div class="auth-wall-icon">🎙️</div>
+    <h2 style="margin-bottom:4px;">Audio Contributor Profile</h2>
+    <p class="auth-wall-sub">Select or create your contributor account so your recordings are neatly stored in your dedicated folder.</p>
+
+    <!-- Tabs: Sign In vs Register -->
+    <div class="auth-tabs" role="tablist">
+      <button type="button" class="auth-tab-btn active" id="tab-btn-login">Sign In</button>
+      <button type="button" class="auth-tab-btn" id="tab-btn-register">New Contributor</button>
+    </div>
+
+    <!-- ── 1. Sign In Form ──────────────────────────────────────── -->
+    <form id="form-contributor-login">
+      <div class="form-group">
+        <label for="select-login-user">Choose Your Name / ID:</label>
+        <select id="select-login-user" class="form-control">
+          <option value="">— Select registered contributor —</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="group-manual-username" style="display:none;">
+        <label for="input-login-username">Or Enter Username:</label>
+        <input type="text" id="input-login-username" class="form-control" placeholder="e.g. Kwabena, Ama" autocomplete="username" />
+      </div>
+
+      <div class="form-group">
+        <label for="input-login-pin">Your Passcode / PIN (4+ digits):</label>
+        <input type="password" id="input-login-pin" class="form-control" placeholder="Enter your 4-digit PIN…" required autocomplete="current-password" inputmode="numeric" />
+      </div>
+
+      <button type="submit" id="btn-login-submit" class="btn btn-record btn-submit-full">
+        Sign In 🎙️
+      </button>
+    </form>
+
+    <!-- ── 2. Register Form ─────────────────────────────────────── -->
+    <form id="form-contributor-register" style="display:none;">
+      <div class="form-group">
+        <label for="input-reg-username">Contributor Username / ID:</label>
+        <input type="text" id="input-reg-username" class="form-control" placeholder="e.g. Ama_K, Kwabena" required maxlength="30" autocomplete="username" />
+        <span style="font-size:0.75rem;color:#64748b;">Letters, numbers, underscores (used for your recording folder).</span>
+      </div>
+
+      <div class="form-group">
+        <label for="input-reg-pin">Choose a 4-Digit Passcode / PIN:</label>
+        <input type="password" id="input-reg-pin" class="form-control" placeholder="e.g. 1234" required maxlength="20" autocomplete="new-password" inputmode="numeric" />
+      </div>
+
+      <div class="form-group">
+        <label for="input-reg-pin-confirm">Confirm Passcode / PIN:</label>
+        <input type="password" id="input-reg-pin-confirm" class="form-control" placeholder="Re-enter PIN…" required maxlength="20" autocomplete="new-password" inputmode="numeric" />
+      </div>
+
+      <button type="submit" id="btn-register-submit" class="btn btn-primary btn-submit-full">
+        Create Contributor Profile 🚀
+      </button>
+    </form>
+
+    <div id="user-auth-error" class="login-error-msg" hidden></div>
+    <div id="user-auth-success" class="login-error-msg" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0;" hidden></div>
+
+    <div class="auth-wall-footer" style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:0.8rem;color:#64748b;">Protected per-user workspace</span>
+      <a href="/login" class="auth-wall-back" title="Go to Administrator Login">🛡️ Admin Login</a>
+    </div>
+  </div>
+
+  <script src="user-login.js"></script>
+</body>
+</html>
+

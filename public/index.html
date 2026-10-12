@@ -70,7 +70,7 @@
       />
     </div>
     <div class="filter-wrap">
-      <span class="collector-badge">Format: <strong>MP3 (128 kbps)</strong></span>
+      <span class="collector-badge">Format: <strong>WAV (Lossless PCM)</strong></span>
     </div>
   </div>
 
@@ -136,7 +136,7 @@
           <span class="btn-icon">■</span> Stop
         </button>
         <button id="btn-play" class="btn btn-play" title="Play back recording" disabled>
-          <span class="btn-icon">▶</span> Play (MP3)
+          <span class="btn-icon">▶</span> Play (WAV)
         </button>
       </div>
 
@@ -151,16 +151,15 @@
       <!-- Upload -->
       <div class="upload-row">
         <button id="btn-upload" class="btn btn-upload" disabled>
-          ☁️ Upload MP3 to Folder
+          ☁️ Upload WAV to Folder
         </button>
         <div id="upload-status" class="upload-status"></div>
       </div>
     </div>
   </div>
 
-  <!-- Vendor MP3 encoder & helper -->
-  <script src="/vendor/lame.all.min.js"></script>
-  <script src="/mp3-encoder.js"></script>
+  <!-- Lossless PCM WAV Audio Recorder & Encoder -->
+  <script src="/wav-encoder.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -74,8 +74,11 @@ async function checkExistingSession() {
     const data = await res.json();
     if (data && data.authenticated && data.user) {
       localStorage.setItem('dcs_audio_user', data.user.username);
-      // Already authenticated, redirect to main collector
-      window.location.replace('/');
+      if (data.user.practiceApproved) {
+        window.location.replace('/');
+      } else {
+        window.location.replace('/practice.html');
+      }
     }
   } catch (_) {}
 }
@@ -136,9 +139,15 @@ function bindEvents() {
         sessionStorage.setItem('dcs_contributor_token', data.token);
       }
 
-      showSuccess(`Welcome back, ${data.user.displayName || data.user.username}! Redirecting…`);
+      const isApproved = Boolean(data.user && data.user.practiceApproved);
+      const targetUrl = isApproved ? '/' : '/practice.html';
+      const welcomeMsg = isApproved
+        ? `Welcome back, ${data.user.displayName || data.user.username}! Redirecting to recorder…`
+        : `Welcome back, ${data.user.displayName || data.user.username}! Loading practice round…`;
+
+      showSuccess(welcomeMsg);
       setTimeout(() => {
-        window.location.replace('/');
+        window.location.replace(targetUrl);
       }, 400);
 
     } catch (err) {
@@ -199,9 +208,9 @@ function bindEvents() {
         sessionStorage.setItem('dcs_contributor_token', data.token);
       }
 
-      showSuccess(`Profile created for ${data.user.displayName}! Launching recorder…`);
+      showSuccess(`Profile created for ${data.user.displayName}! Directing to practice round…`);
       setTimeout(() => {
-        window.location.replace('/');
+        window.location.replace('/practice.html');
       }, 500);
 
     } catch (err) {

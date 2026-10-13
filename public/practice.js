@@ -58,7 +58,7 @@ function escapeHtml(s) {
 
 function updateSavedProgress() {
   if (badgeSavedTakes) {
-    const total = questions.length || 15;
+    const total = questions.length || 3;
     const saved = savedQuestionIds.size;
     badgeSavedTakes.textContent = `💾 ${saved} / ${total} saved`;
     if (saved >= total && total > 0) {
@@ -79,7 +79,7 @@ async function load({ keepIds = false } = {}) {
     card.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading practice questions…</p></div>';
   }
   try {
-    const url = `/api/practice?lang=${lang}&count=15` + (ids ? `&ids=${encodeURIComponent(ids)}` : '');
+    const url = `/api/practice?lang=${lang}&count=3` + (ids ? `&ids=${encodeURIComponent(ids)}` : '');
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
@@ -186,7 +186,7 @@ if (btnNext) {
     if (index < questions.length - 1) {
       if (currentQ && !savedQuestionIds.has(currentQ.id)) {
         const proceed = confirm(
-          `You have not saved a take for ${currentQ.id} yet.\n\nAll 15 practice items must be recorded and saved before you can submit for admin approval. Proceed to the next question anyway?`
+          `You have not saved a take for ${currentQ.id} yet.\n\nAll 3 practice items must be recorded and saved before you can submit for admin approval. Proceed to the next question anyway?`
         );
         if (!proceed) return;
       }

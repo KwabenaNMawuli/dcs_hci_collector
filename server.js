@@ -249,7 +249,29 @@ function saveTokens(newTokens) {
     persistRefreshTokenToEnv(merged.refresh_token);
   }
 
+  // Persist tokens in PostgreSQL app_settings table (survives all Heroku redeployments)
+  try {
+    userManager.setDbSetting('google_tokens', JSON.stringify(merged)).catch(() => {});
+  } catch (_) {}
+
   return merged;
+}
+
+async function loadTokensFromDb(oauth2Client) {
+  try {
+    const raw = await userManager.getDbSetting('google_tokens');
+    if (raw) {
+      const tokens = JSON.parse(raw);
+      if (tokens && (tokens.refresh_token || tokens.access_token)) {
+        oauth2Client.setCredentials(tokens);
+        console.log('🐘 Loaded persistent Google OAuth credentials from PostgreSQL.');
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load tokens from PostgreSQL:', err.message);
+  }
+  return false;
 }
 
 function loadSavedTokens(oauth2Client) {
@@ -647,29 +669,78 @@ async function restoreUsersFromDrive() {
     const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
     if (!drive || !cleanFolderId) return;
 
-    const res = await drive.files.list({
-      q: `'${cleanFolderId}' in parents and name = 'dcs_users_registry.json' and trashed = false`,
-      fields: 'files(id, name, modifiedTime)',
-      pageSize: 1,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    // A. Check for dcs_users_registry.json
+    try {
+      const res = await drive.files.list({
+        q: `'${cleanFolderId}' in parents and name = 'dcs_users_registry.json' and trashed = false`,
+        fields: 'files(id, name, modifiedTime)',
+        pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
 
-    if (res.data.files && res.data.files.length > 0) {
-      const fileId = res.data.files[0].id;
-      const downloadRes = await drive.files.get(
-        { fileId, alt: 'media', supportsAllDrives: true },
-        { responseType: 'text' }
-      );
+      if (res.data.files && res.data.files.length > 0) {
+        const fileId = res.data.files[0].id;
+        const downloadRes = await drive.files.get(
+          { fileId, alt: 'media', supportsAllDrives: true },
+          { responseType: 'text' }
+        );
 
-      const content = downloadRes.data;
-      if (content) {
-        const cloudUsers = typeof content === 'string' ? JSON.parse(content) : content;
-        if (Array.isArray(cloudUsers) && cloudUsers.length > 0) {
-          userManager.mergeUsers(cloudUsers);
-          console.log(`✅ Restored ${cloudUsers.length} contributor account(s) from Google Drive.`);
+        const content = downloadRes.data;
+        if (content) {
+          const cloudUsers = typeof content === 'string' ? JSON.parse(content) : content;
+          if (Array.isArray(cloudUsers) && cloudUsers.length > 0) {
+            userManager.mergeUsers(cloudUsers);
+            console.log(`✅ Restored ${cloudUsers.length} contributor account(s) from Google Drive registry.`);
+          }
         }
       }
+    } catch (regErr) {
+      console.warn('Could not read dcs_users_registry.json:', regErr.message);
+    }
+
+    // B. Reconcile existing User_* folders in Drive (auto-recovers all contributors who recorded)
+    try {
+      const folderRes = await drive.files.list({
+        q: `'${cleanFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name contains 'User_' and trashed = false`,
+        fields: 'files(id, name, createdTime)',
+        pageSize: 1000,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      const folders = folderRes.data.files || [];
+      const recoveredUsers = [];
+      const currentUsers = userManager.getRawUsers();
+      const existingMap = new Map(currentUsers.map(u => [u.username.toLowerCase(), u]));
+
+      for (const f of folders) {
+        const uName = f.name.replace(/^User_/, '').trim();
+        if (uName && !existingMap.has(uName.toLowerCase())) {
+          const salt = crypto.randomBytes(16).toString('hex');
+          const defaultPin = '1234';
+          const pinHash = crypto.createHash('sha256').update(`${salt}:${defaultPin}`).digest('hex');
+          recoveredUsers.push({
+            username: uName,
+            displayName: uName,
+            salt,
+            pinHash,
+            createdAt: f.createdTime || new Date().toISOString(),
+            lastActive: f.createdTime || new Date().toISOString(),
+            practiceCompleted: true,
+            practiceApproved: true,
+            practiceApprovedAt: new Date().toISOString(),
+            practiceApprovedBy: 'auto_recovered_from_drive_folder',
+          });
+        }
+      }
+
+      if (recoveredUsers.length > 0) {
+        userManager.mergeUsers(recoveredUsers);
+        console.log(`✅ Auto-recovered ${recoveredUsers.length} contributor account(s) directly from Google Drive folders!`);
+      }
+    } catch (fErr) {
+      console.warn('Drive folder scan error:', fErr.message);
     }
   } catch (err) {
     // Non-fatal if drive not connected yet
@@ -684,6 +755,11 @@ async function persistUsersToDrive() {
     if (!drive || !cleanFolderId) return;
 
     const users = userManager.getRawUsers();
+    if (!users || users.length === 0) {
+      console.log('ℹ️ Skipping persistUsersToDrive: local users registry is empty.');
+      return;
+    }
+
     const content = JSON.stringify(users, null, 2);
 
     const res = await drive.files.list({
@@ -1732,7 +1808,22 @@ app.get('/api/status', async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`\n🎙️  DCS HCI Audio Collector running at http://localhost:${PORT}\n`);
 
-  // Restore contributor accounts from Google Drive on startup
+  // 1. Initialize PostgreSQL persistence (Heroku Postgres)
+  try {
+    await userManager.initDatabase();
+  } catch (dbErr) {
+    console.warn(`⚠️  PostgreSQL initialization warning: ${dbErr.message}`);
+  }
+
+  // 2. Load Google OAuth credentials from database if available
+  try {
+    const oauth2Client = getOAuth2Client();
+    if (oauth2Client && (!oauth2Client.credentials || (!oauth2Client.credentials.refresh_token && !oauth2Client.credentials.access_token))) {
+      await loadTokensFromDb(oauth2Client);
+    }
+  } catch (_) {}
+
+  // 3. Restore/reconcile contributor accounts from Google Drive on startup
   try {
     await restoreUsersFromDrive();
   } catch (err) {

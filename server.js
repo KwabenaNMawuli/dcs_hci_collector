@@ -1015,7 +1015,7 @@ app.get('/api/questions', async (req, res) => {
 app.get('/api/practice', async (req, res) => {
   try {
     const lang = (req.query.lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
-    const count = Math.min(Math.max(parseInt(req.query.count, 10) || 15, 1), 30);
+    const count = Math.min(Math.max(parseInt(req.query.count, 10) || 3, 1), 30);
     const all = (await getQuestions(lang)).filter((q) => q.text);
 
     let picked;

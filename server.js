@@ -963,6 +963,90 @@ app.get('/api/practice', async (req, res) => {
   }
 });
 
+// Contributor Practice Status & Saved Questions
+app.get('/api/practice/status', async (req, res) => {
+  try {
+    const authUser = getAuthenticatedContributor(req);
+    if (!authUser) {
+      return res.json({ authenticated: false, practiceCompleted: false, practiceApproved: false, savedQuestionIds: [] });
+    }
+    const user = userManager.getUser(authUser);
+    if (!user) {
+      return res.json({ authenticated: false, practiceCompleted: false, practiceApproved: false, savedQuestionIds: [] });
+    }
+
+    const savedQuestionIds = new Set();
+    const userPracticeDir = path.join(UPLOADS_DIR, authUser, 'practice');
+    if (fs.existsSync(userPracticeDir)) {
+      try {
+        const files = fs.readdirSync(userPracticeDir);
+        for (const f of files) {
+          const meta = parseAudioFilename(f, authUser);
+          if (meta.isPractice && meta.questionId) {
+            savedQuestionIds.add(meta.questionId);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Also check Google Drive practice folder if available
+    try {
+      const drive = getDriveClient();
+      const parentId = (DRIVE_FOLDER_ID || '').trim();
+      if (drive && parentId) {
+        const userFolderId = await getUserDriveFolder(drive, parentId, authUser);
+        const practiceFolderId = await getUserPracticeDriveFolder(drive, userFolderId);
+        const driveFiles = await drive.files.list({
+          q: `'${practiceFolderId}' in parents and trashed = false`,
+          fields: 'files(id, name)',
+          pageSize: 200,
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+        if (driveFiles.data.files) {
+          for (const df of driveFiles.data.files) {
+            const meta = parseAudioFilename(df.name, authUser);
+            if (meta.isPractice && meta.questionId) {
+              savedQuestionIds.add(meta.questionId);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    res.json({
+      authenticated: true,
+      user,
+      practiceCompleted: Boolean(user.practiceCompleted),
+      practiceApproved: Boolean(user.practiceApproved),
+      savedQuestionIds: Array.from(savedQuestionIds),
+    });
+  } catch (err) {
+    console.error('GET /api/practice/status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Mark Practice Completed & Request Admin Approval
+app.post('/api/practice/complete', (req, res) => {
+  try {
+    const authUser = getAuthenticatedContributor(req);
+    if (!authUser) {
+      return res.status(401).json({ error: 'Please sign in to submit your practice session.' });
+    }
+    const success = userManager.setPracticeCompleted(authUser);
+    if (!success) {
+      return res.status(404).json({ error: 'User not found in registry.' });
+    }
+    persistUsersToDrive().catch((e) => console.warn('Drive persist practice complete error:', e.message));
+    const user = userManager.getUser(authUser);
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error('POST /api/practice/complete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Main upload route — saves in per-user folder as MP3
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
@@ -972,6 +1056,14 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
 
     if (!normUser || normUser === 'default_user') {
       return res.status(401).json({ error: 'Please sign in with your contributor account before uploading.' });
+    }
+
+    // Enforce admin greenlight requirement before real questionnaire takes can be saved
+    const userRecord = userManager.getUser(normUser);
+    if (!userRecord || !userRecord.practiceApproved) {
+      return res.status(403).json({
+        error: 'Practice approval required. Please complete practice and obtain admin greenlight before recording actual questionnaire items.',
+      });
     }
 
     if (!questionId) {
@@ -1268,6 +1360,7 @@ app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
       const qTracks = uRecs.filter((r) => r.targetType === 'question').length;
       const optTracks = uRecs.filter((r) => r.targetType === 'options').length;
 
+      const regUser = userManager.getUser(u);
       return {
         user: u,
         totalRecordings: uRecs.length,
@@ -1275,7 +1368,10 @@ app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
         eweCount: uEwe.length,
         questionTracks: qTracks,
         optionsTracks: optTracks,
-        lastActive: uRecs.length > 0 ? uRecs[uRecs.length - 1].createdTime : null,
+        practiceCompleted: regUser ? Boolean(regUser.practiceCompleted) : true,
+        practiceApproved: regUser ? Boolean(regUser.practiceApproved) : true,
+        practiceApprovedAt: regUser ? regUser.practiceApprovedAt : null,
+        lastActive: uRecs.length > 0 ? uRecs[uRecs.length - 1].createdTime : (regUser ? regUser.lastActive : null),
       };
     });
 
@@ -1595,6 +1691,27 @@ app.post('/api/admin/reset-user-pin', requireAdminAuth, (req, res) => {
   } catch (err) {
     console.error('POST /api/admin/reset-user-pin error:', err);
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin Approve / Greenlight Contributor for Recording (Protected)
+app.post('/api/admin/approve-user', requireAdminAuth, (req, res) => {
+  try {
+    const { username, approved } = req.body;
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+    const isApproved = approved !== false;
+    const success = userManager.setPracticeApproval(username, isApproved, 'admin');
+    if (!success) {
+      return res.status(404).json({ error: `User "${username}" not found in registry.` });
+    }
+    persistUsersToDrive().catch((e) => console.warn('Drive persist approval error:', e.message));
+    const user = userManager.getUser(username);
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error('POST /api/admin/approve-user error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

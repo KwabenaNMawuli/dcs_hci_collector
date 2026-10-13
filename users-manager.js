@@ -36,7 +36,24 @@ function loadUsers() {
   }
   try {
     const raw = fs.readFileSync(USERS_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    // Grandfather existing accounts if practice approval was not tracked
+    let modified = false;
+    for (const u of parsed) {
+      if (u && typeof u.practiceApproved === 'undefined') {
+        u.practiceCompleted = true;
+        u.practiceApproved = true;
+        u.practiceApprovedAt = u.createdAt || new Date().toISOString();
+        u.practiceApprovedBy = 'system_grandfathered';
+        modified = true;
+      }
+    }
+    if (modified) {
+      saveUsers(parsed);
+    }
+    return parsed;
   } catch (err) {
     console.warn('Could not read users.json, initializing empty list:', err.message);
     return [];
@@ -85,6 +102,10 @@ function registerUser(rawUsername, displayName, pin) {
     pinHash,
     createdAt: now,
     lastActive: now,
+    practiceCompleted: false,
+    practiceApproved: false,
+    practiceApprovedAt: null,
+    practiceApprovedBy: null,
   };
 
   users.push(newUser);
@@ -94,6 +115,8 @@ function registerUser(rawUsername, displayName, pin) {
     username: newUser.username,
     displayName: newUser.displayName,
     createdAt: newUser.createdAt,
+    practiceCompleted: false,
+    practiceApproved: false,
   };
 }
 
@@ -129,6 +152,8 @@ function verifyUser(rawUsername, pin) {
     username: user.username,
     displayName: user.displayName,
     lastActive: user.lastActive,
+    practiceCompleted: Boolean(user.practiceCompleted),
+    practiceApproved: Boolean(user.practiceApproved),
   };
 }
 
@@ -142,6 +167,9 @@ function listUsers() {
     displayName: u.displayName,
     createdAt: u.createdAt,
     lastActive: u.lastActive,
+    practiceCompleted: Boolean(u.practiceCompleted),
+    practiceApproved: Boolean(u.practiceApproved),
+    practiceApprovedAt: u.practiceApprovedAt || null,
   }));
 }
 
@@ -159,6 +187,9 @@ function getUser(rawUsername) {
     displayName: user.displayName,
     createdAt: user.createdAt,
     lastActive: user.lastActive,
+    practiceCompleted: Boolean(user.practiceCompleted),
+    practiceApproved: Boolean(user.practiceApproved),
+    practiceApprovedAt: user.practiceApprovedAt || null,
   };
 }
 
@@ -250,6 +281,48 @@ function mergeUsers(cloudUsers) {
   return merged;
 }
 
+/**
+ * Mark practice as completed for a contributor.
+ * @param {string} rawUsername
+ */
+function setPracticeCompleted(rawUsername) {
+  const username = sanitizeUsername(rawUsername);
+  if (!username) return false;
+  const users = loadUsers();
+  const user = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+  if (!user) return false;
+  user.practiceCompleted = true;
+  user.lastActive = new Date().toISOString();
+  saveUsers(users);
+  return true;
+}
+
+/**
+ * Set approval / greenlight status for a contributor (Admin action).
+ * @param {string} rawUsername
+ * @param {boolean} approved
+ * @param {string} approvedBy
+ */
+function setPracticeApproval(rawUsername, approved, approvedBy = 'admin') {
+  const username = sanitizeUsername(rawUsername);
+  if (!username) return false;
+  const users = loadUsers();
+  const user = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+  if (!user) return false;
+  user.practiceApproved = Boolean(approved);
+  if (user.practiceApproved) {
+    user.practiceCompleted = true;
+    user.practiceApprovedAt = new Date().toISOString();
+    user.practiceApprovedBy = approvedBy;
+  } else {
+    user.practiceApprovedAt = null;
+    user.practiceApprovedBy = null;
+  }
+  user.lastActive = new Date().toISOString();
+  saveUsers(users);
+  return true;
+}
+
 module.exports = {
   sanitizeUsername,
   registerUser,
@@ -260,4 +333,6 @@ module.exports = {
   renameUserInRegistry,
   getRawUsers,
   mergeUsers,
+  setPracticeCompleted,
+  setPracticeApproval,
 };

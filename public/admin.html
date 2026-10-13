@@ -92,9 +92,14 @@
 
     <!-- ── Contributor Leaderboard & Management ──────────────────── -->
     <section class="admin-section">
-      <div class="section-heading">
-        <h2>👥 Contributors & Folders</h2>
-        <span class="section-sub">Individual recording progress per user</span>
+      <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2>👥 Contributors & Folders</h2>
+          <span class="section-sub">Individual recording progress per user</span>
+        </div>
+        <button type="button" class="btn btn-upload" id="btn-open-create-user-modal" style="font-size:0.88rem; padding:8px 16px;">
+          ➕ Create Contributor
+        </button>
       </div>
 
       <div class="admin-card">
@@ -220,6 +225,44 @@
           <button type="button" class="btn btn-primary" id="btn-confirm-rename">Apply Rename</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Create Contributor Modal ────────────────────────────────── -->
+  <div id="create-user-modal" class="modal-overlay" hidden>
+    <div class="modal-box rename-modal-box">
+      <div class="modal-header">
+        <h3 style="margin:0;">➕ Create Contributor Account</h3>
+        <button class="modal-close" id="create-user-modal-close" aria-label="Close">✕</button>
+      </div>
+      <p style="margin:12px 0 16px;color:#475569;font-size:0.9rem;line-height:1.4;">
+        Directly provision a contributor profile from the admin console. You can pre-approve them so they can begin recording immediately without the practice gate.
+      </p>
+      <form id="form-create-user" style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:0.82rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Contributor Username / ID *</label>
+          <input type="text" id="create-user-username" placeholder="e.g. kwabena_01" required maxlength="40" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div>
+          <label style="font-size:0.82rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Display Name (Optional)</label>
+          <input type="text" id="create-user-display-name" placeholder="e.g. Kwabena Mensah" maxlength="60" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div>
+          <label style="font-size:0.82rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Passcode / 4-Digit PIN *</label>
+          <input type="text" id="create-user-pin" placeholder="e.g. 1234" required minlength="4" maxlength="12" value="1234" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+          <input type="checkbox" id="create-user-auto-approve" checked style="width:16px;height:16px;cursor:pointer;" />
+          <label for="create-user-auto-approve" style="font-size:0.88rem;color:#1e293b;cursor:pointer;">
+            <strong>Pre-approve for recording</strong> (Greenlit to record immediately)
+          </label>
+        </div>
+        <div id="create-user-error" style="color:#b91c1c;font-size:0.85rem;margin-top:4px;" hidden></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+          <button type="button" class="btn btn-stop" id="btn-cancel-create-user">Cancel</button>
+          <button type="submit" class="btn btn-upload" id="btn-confirm-create-user">Create Account 🚀</button>
+        </div>
+      </form>
     </div>
   </div>
 

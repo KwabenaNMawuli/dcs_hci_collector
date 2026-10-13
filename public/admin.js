@@ -44,6 +44,19 @@ const renameNewUser = document.getElementById('rename-new-user');
 const btnCancelRename = document.getElementById('btn-cancel-rename');
 const btnConfirmRename = document.getElementById('btn-confirm-rename');
 
+// Create user modal
+const btnOpenCreateUser = document.getElementById('btn-open-create-user-modal');
+const createUserModal = document.getElementById('create-user-modal');
+const createUserModalClose = document.getElementById('create-user-modal-close');
+const btnCancelCreateUser = document.getElementById('btn-cancel-create-user');
+const formCreateUser = document.getElementById('form-create-user');
+const inputCreateUsername = document.getElementById('create-user-username');
+const inputCreateDisplayName = document.getElementById('create-user-display-name');
+const inputCreatePin = document.getElementById('create-user-pin');
+const checkCreateAutoApprove = document.getElementById('create-user-auto-approve');
+const createUserError = document.getElementById('create-user-error');
+const btnConfirmCreateUser = document.getElementById('btn-confirm-create-user');
+
 // Drive auth elements
 const badgeDrive = document.getElementById('badge-drive-connected');
 const btnAuthDrive = document.getElementById('btn-auth-drive');
@@ -194,6 +207,12 @@ function bindEvents() {
   if (renameModalClose) renameModalClose.addEventListener('click', closeRenameModal);
   if (btnCancelRename) btnCancelRename.addEventListener('click', closeRenameModal);
   if (btnConfirmRename) btnConfirmRename.addEventListener('click', handleRenameSubmit);
+
+  // Create user modal events
+  if (btnOpenCreateUser) btnOpenCreateUser.addEventListener('click', openCreateUserModal);
+  if (createUserModalClose) createUserModalClose.addEventListener('click', closeCreateUserModal);
+  if (btnCancelCreateUser) btnCancelCreateUser.addEventListener('click', closeCreateUserModal);
+  if (formCreateUser) formCreateUser.addEventListener('submit', handleCreateUserSubmit);
 }
 
 async function checkAuthStatus() {
@@ -658,6 +677,75 @@ async function handleRenameSubmit() {
   } finally {
     btnConfirmRename.disabled = false;
     btnConfirmRename.textContent = 'Apply Rename';
+  }
+}
+
+// ── Create Contributor Modal ───────────────────────────────────────────────
+function openCreateUserModal() {
+  if (createUserModal) {
+    if (formCreateUser) formCreateUser.reset();
+    if (inputCreatePin) inputCreatePin.value = '1234';
+    if (checkCreateAutoApprove) checkCreateAutoApprove.checked = true;
+    if (createUserError) createUserError.hidden = true;
+    createUserModal.hidden = false;
+    if (inputCreateUsername) inputCreateUsername.focus();
+  }
+}
+
+function closeCreateUserModal() {
+  if (createUserModal) createUserModal.hidden = true;
+}
+
+async function handleCreateUserSubmit(e) {
+  e.preventDefault();
+  if (createUserError) createUserError.hidden = true;
+
+  const username = (inputCreateUsername ? inputCreateUsername.value : '').trim();
+  const displayName = (inputCreateDisplayName ? inputCreateDisplayName.value : '').trim();
+  const pin = (inputCreatePin ? inputCreatePin.value : '').trim();
+  const autoApprove = checkCreateAutoApprove ? checkCreateAutoApprove.checked : true;
+
+  if (!username) {
+    if (createUserError) {
+      createUserError.hidden = false;
+      createUserError.textContent = 'Please enter a username or contributor ID.';
+    }
+    return;
+  }
+  if (!pin || pin.length < 4) {
+    if (createUserError) {
+      createUserError.hidden = false;
+      createUserError.textContent = 'Passcode / PIN must be at least 4 digits or characters.';
+    }
+    return;
+  }
+
+  btnConfirmCreateUser.disabled = true;
+  btnConfirmCreateUser.textContent = '⏳ Creating…';
+
+  try {
+    const { res, data } = await safeFetchJson('/api/admin/create-user', {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ username, displayName, pin, autoApprove }),
+    });
+
+    if (!res.ok) {
+      throw new Error((data && data.error) || 'Failed to create user account');
+    }
+
+    closeCreateUserModal();
+    await loadAdminData();
+    const statusText = data.user && data.user.practiceApproved ? 'Greenlit (Ready to record immediately)' : 'In Practice';
+    alert(`✅ Contributor "${data.user.displayName || data.user.username}" created successfully!\nPIN: ${pin}\nStatus: ${statusText}`);
+  } catch (err) {
+    if (createUserError) {
+      createUserError.hidden = false;
+      createUserError.textContent = `❌ ${err.message}`;
+    }
+  } finally {
+    btnConfirmCreateUser.disabled = false;
+    btnConfirmCreateUser.textContent = 'Create Account 🚀';
   }
 }
 

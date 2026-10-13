@@ -1770,6 +1770,34 @@ app.post('/api/admin/reset-user-pin', requireAdminAuth, (req, res) => {
   }
 });
 
+// Admin Create Contributor Account (Protected)
+app.post('/api/admin/create-user', requireAdminAuth, (req, res) => {
+  try {
+    const { username, displayName, pin, autoApprove } = req.body;
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+    if (!pin || String(pin).trim().length < 4) {
+      return res.status(400).json({ error: 'PIN must be at least 4 digits or characters' });
+    }
+
+    const user = userManager.registerUser(username, displayName || username, pin);
+
+    if (autoApprove) {
+      userManager.setPracticeApproval(user.username, true, 'admin');
+    }
+
+    // Persist to Drive cloud registry in background
+    persistUsersToDrive().catch((e) => console.warn('Drive persist create user error:', e.message));
+
+    const fullUser = userManager.getUser(user.username);
+    res.json({ success: true, user: fullUser });
+  } catch (err) {
+    console.error('POST /api/admin/create-user error:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Admin Approve / Greenlight Contributor for Recording (Protected)
 app.post('/api/admin/approve-user', requireAdminAuth, (req, res) => {
   try {

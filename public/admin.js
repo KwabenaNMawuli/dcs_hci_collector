@@ -269,16 +269,45 @@ function renderKPIs(data) {
 // ── Users Table Rendering ──────────────────────────────────────────────────
 function renderUsersTable(users) {
   if (!users || users.length === 0) {
-    usersTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-4" style="color:#64748b;">No contributor recordings found yet.</td></tr>`;
+    usersTableBody.innerHTML = `<tr><td colspan="7" class="text-center py-4" style="color:#64748b;">No contributor recordings found yet.</td></tr>`;
     return;
   }
 
   usersTableBody.innerHTML = '';
   for (const u of users) {
+    let statusBadge = '';
+    let greenlightBtn = '';
+
+    if (u.practiceApproved) {
+      statusBadge = '<span class="lang-badge akan" style="background:#dcfce7; color:#15803d; border-color:#86efac; font-weight:600;">🟢 Greenlit</span>';
+      greenlightBtn = `
+        <button type="button" class="btn-icon-link btn-revoke-user" data-user="${escapeHtml(u.user)}" style="color:#b91c1c;" title="Revoke recording permission and send user back to practice">
+          ⛔ Revoke
+        </button>
+      `;
+    } else if (u.practiceCompleted) {
+      statusBadge = '<span class="lang-badge ewe" style="background:#fef3c7; color:#92400e; border-color:#fcd34d; font-weight:700;">🟡 Needs Greenlight</span>';
+      greenlightBtn = `
+        <button type="button" class="btn-icon-link btn-approve-user" data-user="${escapeHtml(u.user)}" style="color:#15803d; font-weight:700;" title="Give greenlight to start real questionnaire recordings">
+          ✅ Give Greenlight
+        </button>
+      `;
+    } else {
+      statusBadge = '<span class="lang-badge" style="background:#f1f5f9; color:#475569; border-color:#cbd5e1;">⚪ In Practice</span>';
+      greenlightBtn = `
+        <button type="button" class="btn-icon-link btn-approve-user" data-user="${escapeHtml(u.user)}" style="color:#15803d;" title="Directly approve this user for recording">
+          ✅ Approve Early
+        </button>
+      `;
+    }
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>
         <span class="user-badge">👤 ${escapeHtml(u.user)}</span>
+      </td>
+      <td>
+        ${statusBadge}
       </td>
       <td><strong>${u.totalRecordings}</strong> takes</td>
       <td><span class="lang-badge akan">${u.akanCount}</span></td>
@@ -288,6 +317,7 @@ function renderUsersTable(users) {
       </td>
       <td>
         <div class="btn-action-group">
+          ${greenlightBtn}
           <button type="button" class="btn-icon-link btn-export-user" data-user="${escapeHtml(u.user)}" title="Export recordings and transcripts as spreadsheet for this contributor">
             📥 Export
           </button>
@@ -305,6 +335,54 @@ function renderUsersTable(users) {
     `;
     usersTableBody.appendChild(tr);
   }
+
+  usersTableBody.querySelectorAll('.btn-approve-user').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const u = btn.dataset.user;
+      if (!confirm(`Give greenlight to contributor "${u}" to start recording actual questionnaire questions?`)) {
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳ Approving…';
+      try {
+        const { res, data } = await safeFetchJson('/api/admin/approve-user', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ username: u, approved: true }),
+        });
+        if (!res.ok) throw new Error((data && data.error) || 'Failed to approve contributor');
+        await loadAdminData();
+        alert(`✅ Contributor "${u}" has been greenlit! Their recording dashboard will open automatically.`);
+      } catch (err) {
+        alert('Could not approve user: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = '✅ Give Greenlight';
+      }
+    });
+  });
+
+  usersTableBody.querySelectorAll('.btn-revoke-user').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const u = btn.dataset.user;
+      if (!confirm(`Revoke recording permission for "${u}"? They will be required to practice again.`)) {
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const { res, data } = await safeFetchJson('/api/admin/approve-user', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ username: u, approved: false }),
+        });
+        if (!res.ok) throw new Error((data && data.error) || 'Failed to revoke permission');
+        await loadAdminData();
+        alert(`Permission revoked for "${u}".`);
+      } catch (err) {
+        alert('Could not revoke permission: ' + err.message);
+        btn.disabled = false;
+      }
+    });
+  });
 
   usersTableBody.querySelectorAll('.btn-export-user').forEach(btn => {
     btn.addEventListener('click', () => {

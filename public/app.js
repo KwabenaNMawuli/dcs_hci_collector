@@ -97,17 +97,17 @@ async function initUser() {
       window.location.replace('/user-login.html');
       return false;
     }
+    if (!data.user.practiceApproved) {
+      // Practice completion and admin greenlight required before actual recording
+      window.location.replace('/practice.html');
+      return false;
+    }
     currentUser = data.user.username;
     localStorage.setItem('dcs_audio_user', currentUser);
     if (nameEl) nameEl.textContent = data.user.displayName || currentUser;
   } catch (err) {
-    const stored = localStorage.getItem('dcs_audio_user');
-    if (!stored || stored === 'default_user') {
-      window.location.replace('/user-login.html');
-      return false;
-    }
-    currentUser = stored;
-    if (nameEl) nameEl.textContent = currentUser;
+    window.location.replace('/practice.html');
+    return false;
   }
 
   if (btnSignout) {

@@ -26,40 +26,78 @@
         </div>
       </div>
 
-      <a href="/" class="auth-btn">← Back to recorder</a>
+      <div class="header-user-actions" style="display:flex; align-items:center; gap:8px;">
+        <span class="user-pill" id="practice-user-pill" style="font-size:0.88rem; font-weight:600; color:#334155; background:#f1f5f9; padding:4px 10px; border-radius:999px;">
+          👤 <span id="practice-user-name">Contributor</span>
+        </span>
+        <a href="/" class="auth-btn" id="btn-back-to-recorder" style="display:none;">← Go to recorder</a>
+        <button type="button" class="auth-btn" id="btn-practice-signout">Sign out</button>
+      </div>
     </div>
   </header>
 
   <main class="practice-main">
-    <div class="practice-progress">
-      <span id="p-counter">—</span>
-      <div class="p-bar"><div id="p-bar-fill"></div></div>
-      <button type="button" class="btn-mini btn-mini-play" id="btn-new-set">🔀 New set</button>
+    <!-- Practice Requirement Notice -->
+    <div class="practice-notice-banner" id="practice-notice-banner">
+      📌 <strong>Practice Requirement:</strong> Please record and save a warm-up take for each question below. Once all takes are saved, submit your practice set so an administrator can give the green light for real recording.
     </div>
 
-    <section class="practice-card" id="practice-card">
-      <div class="loading-state"><div class="spinner"></div><p>Loading questions…</p></div>
-    </section>
+    <!-- Active Practice Workspace -->
+    <div id="practice-workspace">
+      <div class="practice-progress">
+        <span id="p-counter">—</span>
+        <div class="p-bar"><div id="p-bar-fill"></div></div>
+        <span class="badge-saved-takes" id="badge-saved-takes" style="font-weight:600; font-size:0.85rem; color:#1e293b;">💾 0 / 15 saved</span>
+        <button type="button" class="btn-mini btn-mini-play" id="btn-new-set" title="Load another random practice selection">🔀 New set</button>
+      </div>
 
-    <canvas id="waveform" class="waveform" width="600" height="80" aria-hidden="true"></canvas>
-    <div class="record-timer" id="record-timer">00:00</div>
+      <section class="practice-card" id="practice-card">
+        <div class="loading-state"><div class="spinner"></div><p>Loading questions…</p></div>
+      </section>
 
-    <div class="record-controls">
-      <button id="btn-record" class="btn btn-record"><span class="btn-icon">●</span> Record</button>
-      <button id="btn-stop" class="btn btn-stop" disabled><span class="btn-icon">■</span> Stop</button>
-      <button id="btn-play" class="btn btn-play" disabled><span class="btn-icon">▶</span> Play</button>
+      <canvas id="waveform" class="waveform" width="600" height="80" aria-hidden="true"></canvas>
+      <div class="record-timer" id="record-timer">00:00</div>
+
+      <div class="record-controls">
+        <button id="btn-record" class="btn btn-record"><span class="btn-icon">●</span> Record</button>
+        <button id="btn-stop" class="btn btn-stop" disabled><span class="btn-icon">■</span> Stop</button>
+        <button id="btn-play" class="btn btn-play" disabled><span class="btn-icon">▶</span> Play</button>
+      </div>
+      <audio id="playback-audio" style="display:none"></audio>
+
+      <div class="practice-save">
+        <button id="btn-save" class="btn btn-upload" disabled>💾 Save practice take</button>
+        <span id="save-status" class="upload-status"></span>
+        <p class="practice-note" id="practice-save-note">Required: Click <strong>Save practice take</strong> after each recording to complete your warm-up.</p>
+      </div>
+
+      <div class="practice-nav">
+        <button id="btn-prev" class="btn btn-stop" disabled>← Previous</button>
+        <button id="btn-next" class="btn btn-play">Next →</button>
+      </div>
     </div>
-    <audio id="playback-audio" style="display:none"></audio>
 
-    <div class="practice-save">
-      <button id="btn-save" class="btn btn-upload" disabled>💾 Save practice take</button>
-      <span id="save-status" class="upload-status"></span>
-      <p class="practice-note">Optional. Saved separately in the <strong>practice</strong> folder, never with the real recordings.</p>
-    </div>
-
-    <div class="practice-nav">
-      <button id="btn-prev" class="btn btn-stop" disabled>← Previous</button>
-      <button id="btn-next" class="btn btn-play">Next →</button>
+    <!-- Live Waiting for Admin Approval Screen -->
+    <div id="waiting-approval-screen" class="waiting-approval-screen" style="display: none;">
+      <div class="waiting-card">
+        <div class="waiting-icon-pulse">⏳</div>
+        <h2>Practice Submitted for Review!</h2>
+        <p class="waiting-sub">
+          Great job! All practice takes have been successfully recorded and saved in your practice folder.
+        </p>
+        <div class="waiting-status-box">
+          <div class="waiting-spinner"></div>
+          <div>
+            <strong>Awaiting Administrator Greenlight…</strong>
+            <p style="margin:4px 0 0; color:#475569; font-size:0.92rem;">
+              Your administrator has been notified to review your practice audio. Once approved, this page will automatically unlock and launch your recording studio.
+            </p>
+          </div>
+        </div>
+        <div class="waiting-actions" style="margin-top:20px; display:flex; gap:12px; justify-content:center;">
+          <button type="button" class="btn btn-upload" id="btn-manual-check">Check Approval Status 🔄</button>
+        </div>
+      </div>
     </div>
   </main>
 

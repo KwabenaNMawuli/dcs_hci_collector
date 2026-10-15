@@ -34,3 +34,6 @@ desktop.ini
 uploads/
 tmp/
 temp/
+
+# Local audit sign-off state (dev fallback; production uses Postgres)
+audits.json

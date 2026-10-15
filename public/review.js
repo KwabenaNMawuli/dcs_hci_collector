@@ -257,10 +257,11 @@
   async function loadFromServer() {
     AV.toast('Loading recordings from the server…');
     try {
-      const [recRes, akanRes, eweRes] = await Promise.all([
+      const [recRes, akanRes, eweRes, missRes] = await Promise.all([
         fetch('/api/admin/recordings', { headers: adminHeaders() }),
         fetch('/api/questions?lang=akan'),
         fetch('/api/questions?lang=ewe'),
+        fetch('/api/admin/missing', { headers: adminHeaders() }),
       ]);
       if (recRes.status === 401) return toLogin();
       if (!recRes.ok) throw new Error('Could not load recordings');
@@ -271,13 +272,22 @@
         if (r.ok) (await r.json()).questions.forEach((q) => qmaps[lang].set(q.id.toLowerCase(), q));
       }
 
-      const list = recordings
-        .slice()
+      // Items a contributor has not recorded yet. If this call fails the recordings still load.
+      let missing = [];
+      if (missRes.ok) missing = (await missRes.json()).items || [];
+      else AV.toast('Loaded the recordings, but couldn’t check for missing items.');
+
+      const rows = [
+        ...recordings.map((r) => ({ ...r, status: 'ok' })),
+        ...missing.map((m) => ({ ...m, targetType: m.track, missingText: m.text })),
+      ];
+
+      const list = rows
         .sort((a, b) => a.user.localeCompare(b.user) || a.name.localeCompare(b.name, undefined, { numeric: true }))
         .map((r, i) => {
           const q = (qmaps[r.lang] || new Map()).get((r.questionId || '').toLowerCase());
           const isOpts = r.targetType === 'options';
-          const text = q ? (isOpts ? (q.options || []).join('\n') || q.text : q.text) : '';
+          const text = r.missingText != null ? r.missingText : (q ? (isOpts ? (q.options || []).join('\n') || q.text : q.text) : '');
           const track = isOpts ? 'Options' : 'Question';
           const lang = r.lang === 'ewe' ? 'Ewe' : 'Akan';
           return {
@@ -287,13 +297,14 @@
             qnum: r.questionId,
             user: r.user,
             text: text || '',
+            status: r.status,
             chips: [{ label: 'Contributor', value: r.user }, { label: 'Language', value: lang }, { label: 'Track', value: track }],
             filters: {
               user: { label: 'contributors', value: r.user },
               lang: { label: 'languages', value: lang },
               track: { label: 'tracks', value: track },
             },
-            audio: r.streamUrl ? { url: r.streamUrl } : null,
+            audio: r.status === 'ok' && r.streamUrl ? { url: r.streamUrl } : null,
             meta: { name: r.name, user: r.user, rawBase: r.name },
           };
         });
@@ -301,7 +312,10 @@
       csv = null;
       sourceKind = 'server';
       useSource('server');
-      $('fileChip').textContent = `Server · ${list.length} recordings`;
+      const nMissing = list.filter((i) => i.status === 'missing').length;
+      const nPending = list.filter((i) => i.status === 'pending').length;
+      $('fileChip').textContent = `Server · ${list.length - nMissing - nPending} recordings`
+        + (nMissing ? ` · ${nMissing} missing` : '') + (nPending ? ` · ${nPending} uploading` : '');
       $('mapBtn').classList.add('hidden');
       items = uniqueKeys(list);
       showApp();
@@ -368,7 +382,9 @@
     const hasUser = items.some((i) => i.user);
     const header = ['Question number', 'Audio file', 'Question', 'Status', 'Reviewed', ...(hasUser ? ['Contributor'] : [])];
     const data = items.map((it) => [
-      it.qnum, it.name, viewer.textOf(it), viewer.isEdited(it) ? 'Edited' : 'Retained', done.has(it.key) ? 'Yes' : 'No', ...(hasUser ? [it.user] : []),
+      it.qnum, it.name, viewer.textOf(it),
+      it.status === 'missing' ? 'Missing' : it.status === 'pending' ? 'Waiting for Drive' : viewer.isEdited(it) ? 'Edited' : 'Retained',
+      done.has(it.key) ? 'Yes' : 'No', ...(hasUser ? [it.user] : []),
     ]);
     const base = (source === 'server' ? 'recordings' : source.replace(/\.[^.]+$/, '')) + '_reviewed';
     const edited = data.filter((d) => d[3] === 'Edited').length;

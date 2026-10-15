@@ -18,6 +18,7 @@ const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
 const userManager = require('./users-manager');
 const pendingUploads = require('./pending-uploads');
+const audits = require('./audits');
 
 const PORT = process.env.PORT || 3000;
 
@@ -1486,6 +1487,237 @@ app.get('/api/audio/:user/:filename', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Contributor audit: every questionnaire item for this contributor, showing
+// what is and is not in Drive, plus per-item review marks and a final sign-off
+// ---------------------------------------------------------------------------
+function requireContributor(req, res, next) {
+  const user = getAuthenticatedContributor(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Please sign in with your contributor account.' });
+  }
+  req.contributor = sanitizeUsername(user);
+  next();
+}
+
+// Read-only lookup: unlike getUserDriveFolder this never creates the folder
+async function findUserDriveFolderId(drive, parentId, user) {
+  const normUser = sanitizeUsername(user);
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and (name = 'User_${normUser}' or name = '${normUser}') and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id, name)',
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  const folders = res.data.files || [];
+  if (folders.length === 0) return null;
+  const exact = folders.find((f) => f.name.toLowerCase() === normUser.toLowerCase());
+  return (exact || folders[0]).id;
+}
+
+// Lower-cased filename -> Drive file, for the contributor's main folder (practice subfolder excluded)
+async function listUserDriveAudio(user) {
+  const parentId = (DRIVE_FOLDER_ID || '').trim();
+  if (!parentId) throw new Error('DRIVE_FOLDER_ID is not configured');
+  const drive = getDriveClient();
+  const folderId = await findUserDriveFolderId(drive, parentId, user);
+  const files = new Map();
+  if (!folderId) return files;
+
+  let pageToken;
+  do {
+    const r = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+      fields: 'nextPageToken, files(id, name, size, createdTime)',
+      pageSize: 1000,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of r.data.files || []) {
+      if (!f.name) continue;
+      files.set(f.name.trim().toLowerCase(), {
+        fileId: f.id,
+        name: f.name,
+        size: f.size ? parseInt(f.size, 10) : 0,
+        createdTime: f.createdTime || null,
+      });
+    }
+    pageToken = r.data.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
+function matchesPendingName(pendingNames, prefixes) {
+  return prefixes.some((p) => EXTS.some((ext) => pendingNames.has(`${p.trim().toLowerCase()}${ext}`)));
+}
+
+async function buildAuditItems(user, lang, driveFiles, pendingNames) {
+  const questions = await getQuestions(lang);
+  const items = [];
+  for (const q of questions) {
+    const tracks = [['question', q.text || '']];
+    if (Array.isArray(q.options) && q.options.length > 0) tracks.push(['options', q.options.join('\n')]);
+
+    for (const [track, text] of tracks) {
+      const prefixes = getAudioPrefixes(q.id, track, lang);
+      const file = findDriveFile(driveFiles, prefixes);
+      let status = 'missing';
+      if (file) status = 'ok';
+      else if (matchesPendingName(pendingNames, prefixes)) status = 'pending';
+
+      items.push({
+        key: `${q.id}:${track}:${lang}`,
+        questionId: q.id,
+        track,
+        lang,
+        text,
+        status,
+        name: file ? file.name : null,
+        size: file ? file.size : 0,
+        createdTime: file ? file.createdTime : null,
+        streamUrl: file
+          ? `/api/audio/${encodeURIComponent(user)}/${encodeURIComponent(file.name)}?fileId=${encodeURIComponent(file.fileId)}`
+          : null,
+      });
+    }
+  }
+  return items;
+}
+
+function summarizeAudit(items) {
+  const s = { total: items.length, recorded: 0, pending: 0, missing: 0 };
+  for (const it of items) {
+    if (it.status === 'ok') s.recorded++;
+    else if (it.status === 'pending') s.pending++;
+    else s.missing++;
+  }
+  return s;
+}
+
+// Languages the contributor has recorded in (defaults to Akan when they have recorded nothing yet)
+function recordedLangs(driveFiles, pendingNames) {
+  const langs = new Set();
+  for (const name of [...driveFiles.keys(), ...pendingNames]) {
+    if (name.startsWith('practice_')) continue;
+    langs.add(parseAudioFilename(name, '').lang);
+  }
+  return langs.size > 0 ? [...langs].sort() : ['akan'];
+}
+
+async function loadAuditSources(user) {
+  const driveFiles = await listUserDriveAudio(user);
+  const pending = await pendingUploads.listForUser(user);
+  const pendingNames = new Set(pending.filter((p) => !p.practice).map((p) => p.filename.toLowerCase()));
+  return { driveFiles, pendingNames };
+}
+
+app.get('/api/my-audit', requireContributor, async (req, res) => {
+  try {
+    const user = req.contributor;
+    let sources;
+    try {
+      sources = await loadAuditSources(user);
+    } catch (driveErr) {
+      console.error('GET /api/my-audit Drive error:', driveErr.message);
+      return res.status(502).json({
+        error: 'Could not reach Google Drive right now, so your recordings cannot be checked. Please try again later.',
+      });
+    }
+
+    const langs = recordedLangs(sources.driveFiles, sources.pendingNames);
+    const wanted = (req.query.lang || '').toLowerCase();
+    const lang = wanted === 'ewe' || wanted === 'akan' ? wanted : langs[0];
+    if (!langs.includes(lang)) langs.push(lang);
+
+    const items = await buildAuditItems(user, lang, sources.driveFiles, sources.pendingNames);
+    const audit = await audits.get(user);
+    const known = new Set(items.map((i) => i.key));
+
+    res.json({
+      user,
+      lang,
+      langs: langs.sort(),
+      items,
+      summary: summarizeAudit(items),
+      reviewed: (audit.reviewed || []).filter((k) => known.has(k)),
+      signedOffAt: audit.signedOffAt || null,
+    });
+  } catch (err) {
+    console.error('GET /api/my-audit error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/my-audit/reviewed', requireContributor, async (req, res) => {
+  try {
+    const { key, reviewed } = req.body || {};
+    if (typeof key !== 'string' || !/^[A-Za-z0-9]+:(question|options):(akan|ewe)$/.test(key)) {
+      return res.status(400).json({ error: 'Invalid item key' });
+    }
+    await audits.setReviewed(req.contributor, key, Boolean(reviewed));
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/my-audit/reviewed error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/my-audit/signoff', requireContributor, async (req, res) => {
+  try {
+    const user = req.contributor;
+    let sources;
+    try {
+      sources = await loadAuditSources(user);
+    } catch (driveErr) {
+      return res.status(502).json({ error: 'Could not reach Google Drive right now, so the sign-off cannot be checked. Please try again later.' });
+    }
+
+    const summary = { total: 0, recorded: 0, pending: 0, missing: 0, byLang: {} };
+    for (const lang of recordedLangs(sources.driveFiles, sources.pendingNames)) {
+      const items = await buildAuditItems(user, lang, sources.driveFiles, sources.pendingNames);
+      const s = summarizeAudit(items);
+      summary.byLang[lang] = s;
+      summary.total += s.total;
+      summary.recorded += s.recorded;
+      summary.pending += s.pending;
+      summary.missing += s.missing;
+    }
+
+    if (summary.missing > 0 && !(req.body && req.body.acknowledgeMissing)) {
+      return res.status(409).json({
+        error: `${summary.missing} item(s) have no recording yet.`,
+        summary,
+      });
+    }
+
+    const saved = await audits.signOff(user, summary);
+    res.json({ success: true, signedOffAt: saved.signedOffAt, summary });
+  } catch (err) {
+    console.error('POST /api/my-audit/signoff error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/my-audit/reopen', requireContributor, async (req, res) => {
+  try {
+    await audits.reopen(req.contributor);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Which contributors have signed off their audit (Protected)
+app.get('/api/admin/audits', requireAdminAuth, async (_req, res) => {
+  try {
+    res.json(await audits.listAll());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Recordings waiting in Postgres because Drive was unavailable (Protected)
 app.get('/api/admin/pending-uploads', requireAdminAuth, async (_req, res) => {
   try {
@@ -1515,6 +1747,9 @@ app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
     const { recordings, users } = await listAllRecordings();
 
     // Calculate per-user stats
+    let auditMap = {};
+    try { auditMap = await audits.listAll(); } catch (_) {}
+
     const userStats = users.map((u) => {
       const uRecs = recordings.filter((r) => r.user === u && !r.isPractice);
       const uAkan = uRecs.filter((r) => r.lang === 'akan');
@@ -1533,6 +1768,7 @@ app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
         practiceCompleted: regUser ? Boolean(regUser.practiceCompleted) : true,
         practiceApproved: regUser ? Boolean(regUser.practiceApproved) : true,
         practiceApprovedAt: regUser ? regUser.practiceApprovedAt : null,
+        auditSignedOffAt: (auditMap[u.toLowerCase()] || {}).signedOffAt || null,
         lastActive: uRecs.length > 0 ? uRecs[uRecs.length - 1].createdTime : (regUser ? regUser.lastActive : null),
       };
     });

@@ -42,10 +42,6 @@
     toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
   }
 
-  // Theme is shared by both pages
-  const savedTheme = store.get('theme', null);
-  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
-
   function create(opts) {
     opts = opts || {};
     const audio = $('audio');
@@ -56,7 +52,7 @@
 
     const S = {
       items: [], view: [], cur: -1, filters: {}, query: '',
-      auto: store.get('auto', false), loop: false, fs: store.get('fs', 26),
+      auto: store.get('auto', false), loop: false, fs: store.get('fs', 22),
       peaks: null, loadToken: 0, editing: false,
     };
 
@@ -130,7 +126,7 @@
           + (status(it) === 'missing' ? '<span class="tag missing">MISSING</span>' : '')
           + (status(it) === 'pending' ? '<span class="tag pending">UPLOADING</span>' : '');
         const snip = textOf(it).replace(/\s+/g, ' ').slice(0, 90);
-        return `<div class="item" data-v="${vi}"><span class="num">${esc(it.num == null ? ii + 1 : it.num)}</span><div class="body"><div class="name">${esc(it.name)}${tags}</div><div class="snip">${snip ? esc(snip) : '<i>no text</i>'}</div></div><span class="check ${done.has(it.key) && status(it) !== 'missing' ? 'done' : ''}"></span></div>`;
+        return `<div class="item" data-v="${vi}"><span class="num">${esc(it.num == null ? ii + 1 : it.num)}</span><div class="body"><div class="name"><span class="nm">${esc(it.name)}</span>${tags}</div><div class="snip">${snip ? esc(snip) : '<i>no text</i>'}</div></div><span class="check ${done.has(it.key) && status(it) !== 'missing' ? 'done' : ''}"></span></div>`;
       }).join('') || '<div class="hint" style="padding:20px;text-align:center">No matches</div>';
 
       $('countLbl').textContent = `${S.view.length} of ${S.items.length}`;
@@ -273,7 +269,7 @@
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
       const p = audio.duration ? audio.currentTime / audio.duration : 0;
-      const acc = cssVar('--accent'), wav = cssVar('--wave');
+      const acc = cssVar('--clr-primary'), wav = cssVar('--wave');
       const rr = (x, y, ww, hh, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, ww, hh, r) : g.rect(x, y, ww, hh); g.fill(); };
       if (S.peaks) {
         const bw = 3, gap = 2, n = Math.floor(w / (bw + gap));
@@ -416,6 +412,11 @@
     }
 
     /* ---------- chrome ---------- */
+    const header = document.querySelector('.app-header');
+    const fitHeader = () => document.documentElement.style.setProperty('--hdr-h', (header ? header.offsetHeight : 0) + 'px');
+    fitHeader();
+    if (header) new ResizeObserver(fitHeader).observe(header);
+
     const setFs = (v) => {
       S.fs = Math.max(14, Math.min(56, v));
       document.documentElement.style.setProperty('--fs', S.fs + 'px');
@@ -425,14 +426,6 @@
     $('fontUp').onclick = () => setFs(S.fs + 2);
     $('fontDown').onclick = () => setFs(S.fs - 2);
     $('search').addEventListener('input', (e) => { S.query = e.target.value; render(); select(0, false); });
-    $('themeBtn').onclick = () => {
-      const dark = document.documentElement.dataset.theme
-        ? document.documentElement.dataset.theme === 'dark'
-        : matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.dataset.theme = dark ? 'light' : 'dark';
-      store.set('theme', document.documentElement.dataset.theme);
-      drawWave();
-    };
     $('menuBtn').onclick = () => document.body.classList.toggle('side-open');
 
     document.addEventListener('keydown', (e) => {

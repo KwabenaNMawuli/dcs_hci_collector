@@ -18,7 +18,10 @@
     doneLabel: 'Checked',
     editable: false,
     onDone: saveMark,
-    onProgress: (p) => { $('stChecked').textContent = `${p.done} of ${p.reviewable}`; },
+    onProgress: (p) => {
+      $('stChecked').textContent = `${p.done} of ${p.reviewable} checked`;
+      $('checkFill').style.width = (p.reviewable ? (p.done / p.reviewable) * 100 : 0) + '%';
+    },
     onSelect: (it) => $('recordLink').classList.toggle('hidden', it.status !== 'missing'),
   });
 
@@ -40,7 +43,10 @@
 
   /* ---------- screens ---------- */
   function showMessage(icon, title, text, canRetry) {
-    $('msgIcon').textContent = icon;
+    const loading = icon === '⏳';
+    $('msgSpinner').classList.toggle('hidden', !loading);
+    $('msgIcon').classList.toggle('hidden', loading);
+    $('msgIcon').textContent = loading ? '' : icon;
     $('msgTitle').textContent = title;
     $('msgBody').textContent = text;
     $('msgActions').classList.toggle('hidden', !canRetry);
@@ -48,11 +54,6 @@
     $('bar').classList.add('hidden');
     $('app').classList.add('hidden');
   }
-
-  function fitBar() {
-    document.documentElement.style.setProperty('--bar-h', $('bar').offsetHeight + 'px');
-  }
-  window.addEventListener('resize', () => { if (!$('bar').classList.contains('hidden')) fitBar(); });
 
   function updateBar() {
     const s = data.summary;
@@ -71,16 +72,14 @@
     if (signed) {
       $('signedLbl').textContent = `✓ Signed off on ${new Date(data.signedOffAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`;
     }
-    fitBar();
   }
 
   function renderLangTabs() {
-    const tabs = $('langTabs');
-    tabs.classList.toggle('hidden', data.langs.length < 2);
-    tabs.innerHTML = data.langs
-      .map((l) => `<button type="button" data-lang="${AV.esc(l)}" class="${l === data.lang ? 'on' : ''}">${l === 'ewe' ? 'Ewe' : 'Akan'}</button>`)
+    $('langTabs').classList.toggle('hidden', data.langs.length < 2);
+    $('langGroup').innerHTML = data.langs
+      .map((l) => `<button type="button" data-lang="${AV.esc(l)}" class="lang-btn${l === data.lang ? ' active' : ''}">${l === 'ewe' ? 'Ewe' : 'Akan'}</button>`)
       .join('');
-    tabs.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => load(b.dataset.lang)));
+    $('langGroup').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => load(b.dataset.lang)));
   }
 
   function toItems(list) {
@@ -115,12 +114,12 @@
       data = body;
       done.clear();
       body.reviewed.forEach((k) => done.add(k));
-      $('whoChip').textContent = body.user;
+      $('whoChip').textContent = '👤 ' + body.user;
+      $('whoChip').classList.remove('hidden');
 
       $('landing').classList.add('hidden');
       $('bar').classList.remove('hidden');
       $('app').classList.remove('hidden');
-      $('app').classList.add('has-bar');
 
       renderLangTabs();
       updateBar();

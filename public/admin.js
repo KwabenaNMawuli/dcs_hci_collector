@@ -360,6 +360,7 @@ function renderUsersTable(users) {
     tr.innerHTML = `
       <td>
         <span class="user-badge">👤 ${escapeHtml(u.user)}</span>
+        ${u.auditSignedOffAt ? `<span class="lang-badge" style="background:#dcfce7; color:#15803d; border-color:#86efac; margin-left:6px;" title="Signed off their recording audit on ${escapeHtml(new Date(u.auditSignedOffAt).toLocaleDateString())}">✓ Audit signed off</span>` : ''}
       </td>
       <td>
         ${statusBadge}

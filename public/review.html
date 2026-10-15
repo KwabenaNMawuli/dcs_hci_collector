@@ -1,111 +1,124 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Review Recordings (Admin)</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/viewer.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review Recordings — DCS HCI Audio Collector</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="viewer.css" />
 </head>
 <body>
-<header class="top">
-  <button class="icon-btn menu-btn" id="menuBtn" title="List of items" aria-label="Open the list of items">☰</button>
-  <div class="brand"><span class="dot"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></svg></span>Review Recordings</div>
-  <span class="file-chip" id="fileChip"></span>
-  <span class="spacer"></span>
-  <button class="icon-btn hidden" id="mapBtn" title="Choose which columns to use">Columns</button>
-  <button class="icon-btn hidden" id="serverBtn" title="Load every recording straight from the server">Load from server</button>
-  <button class="icon-btn hidden" id="openBtn" title="Load a CSV or audio files">Load file</button>
-  <button class="icon-btn solid hidden" id="exportBtn" title="Download all rows as an Excel sheet">⤓ Export Excel</button>
-  <a class="icon-btn" href="/admin" title="Back to the admin dashboard">🛡️ <span class="hide-sm">Dashboard</span></a>
-  <button class="icon-btn" id="themeBtn" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button>
-</header>
 
-<div class="card map-panel hidden" id="mapPanel">
-  <strong>Column mapping</strong>
-  <label>Transcript text<select id="mapText"></select></label>
-  <label>Audio URL / path<select id="mapAudio"></select></label>
-  <label>Display name<select id="mapName"></select></label>
-  <label>Contributor<select id="mapUser"></select></label>
-</div>
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="app-header admin-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="mic-icon">🔎</span>
+        <div class="header-title-group">
+          <h1>Review Recordings</h1>
+          <p class="header-subtitle">DCS HCI Audio Collector — Listen, correct and export</p>
+        </div>
+      </div>
 
-<section class="landing" id="landing">
-  <div class="drop" id="dropCard">
-    <div class="big-icon">🎧</div>
-    <h1>Review recordings</h1>
-    <p>Pull every recording straight from the server, or drop in a <b>CSV</b> export. With a CSV you can also add the <b>audio files</b> (or a whole folder) to listen to them.</p>
-    <div class="actions">
-      <button class="primary" id="serverBtn2">Load from server</button>
-      <button class="secondary" id="browseBtn">Choose files</button>
+      <div class="header-controls">
+        <span class="header-file" id="fileChip"></span>
+        <button type="button" class="nav-btn menu-btn" id="menuBtn" aria-label="Open the list of items">☰ Items</button>
+        <button type="button" class="nav-btn hidden" id="mapBtn" title="Choose which columns to use">Columns</button>
+        <button type="button" class="nav-btn hidden" id="serverBtn" title="Load every recording straight from the server">☁️ Load from server</button>
+        <button type="button" class="nav-btn hidden" id="openBtn" title="Load a CSV or audio files">📂 Load file</button>
+        <button type="button" class="nav-btn accent hidden" id="exportBtn" title="Download all rows as an Excel sheet">⤓ Export Excel</button>
+        <a href="/admin" class="nav-btn" title="Back to the admin dashboard">🛡️ Dashboard</a>
+      </div>
     </div>
-    <div class="hint" id="gateHint">Checking admin access…</div>
+  </header>
+
+  <div class="card map-panel hidden" id="mapPanel">
+    <strong>Column mapping</strong>
+    <label>Transcript text<select id="mapText"></select></label>
+    <label>Audio URL / path<select id="mapAudio"></select></label>
+    <label>Display name<select id="mapName"></select></label>
+    <label>Contributor<select id="mapUser"></select></label>
   </div>
-</section>
 
-<section class="app hidden" id="app">
-  <aside class="side">
-    <div class="side-head">
-      <input class="search" id="search" placeholder="Search text or file name…  ( / )" aria-label="Search items">
-      <div class="filters" id="filters"></div>
-      <div class="count"><span id="countLbl"></span><span id="doneLbl"></span></div>
-      <div class="progress-bar"><i id="doneBar"></i></div>
-    </div>
-    <div class="list" id="list"></div>
-  </aside>
-
-  <main class="main">
-    <div class="card text-card">
-      <div class="text-head">
-        <div class="title" id="title"></div>
-        <div class="chips" id="chips"></div>
-        <span class="spacer"></span>
-        <button class="icon-btn" id="fontDown" title="Smaller text" aria-label="Smaller text">A−</button>
-        <button class="icon-btn" id="fontUp" title="Larger text" aria-label="Larger text">A+</button>
-        <span class="edit-off" style="display:contents">
-          <button class="icon-btn" id="copyBtn" title="Copy text">Copy</button>
-          <button class="icon-btn" id="editBtn" title="Edit text (E)">✎ Edit</button>
-          <button class="icon-btn" id="doneBtn" title="Mark reviewed (M)">✓ Reviewed</button>
-        </span>
-        <span class="edit-on hidden" style="display:contents">
-          <button class="icon-btn" id="revertBtn" title="Restore the original text">Revert to original</button>
-          <button class="icon-btn" id="cancelBtn" title="Discard changes (Esc)">Cancel</button>
-          <button class="icon-btn solid" id="saveBtn" title="Save (Ctrl+Enter)">Save</button>
-        </span>
+  <!-- ── Start screen ───────────────────────────────────────────── -->
+  <section class="landing" id="landing">
+    <div class="drop" id="dropCard">
+      <div class="big-icon">🎧</div>
+      <h2>Review recordings</h2>
+      <p>Pull every recording straight from the server, or drop in a <b>CSV</b> export. With a CSV you can also add the <b>audio files</b> (or a whole folder) to listen to them.</p>
+      <div class="actions">
+        <button type="button" class="btn btn-play" id="serverBtn2">☁️ Load from server</button>
+        <button type="button" class="btn btn-outline" id="browseBtn">📂 Choose files</button>
       </div>
-      <div class="text" id="text"></div>
-      <textarea class="editor hidden" id="editor" spellcheck="false" aria-label="Edit the text"></textarea>
+      <div class="hint" id="gateHint">Checking admin access…</div>
     </div>
+  </section>
 
-    <div class="card player">
-      <div class="wave-wrap" id="wave"><canvas id="canvas"></canvas><div class="wave-msg" id="waveMsg"></div></div>
-      <div class="controls">
-        <button class="icon-btn" id="prevBtn" title="Previous (←)" aria-label="Previous item">⏮</button>
-        <button class="play" id="playBtn" title="Play / pause (Space)" aria-label="Play or pause"><svg id="playIco" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg></button>
-        <button class="icon-btn" id="nextBtn" title="Next (→)" aria-label="Next item">⏭</button>
-        <span class="time" id="time">0:00 / 0:00</span>
-        <span class="spacer"></span>
-        <button class="icon-btn" id="backBtn" title="Back 5 seconds (J)">−5s</button>
-        <button class="icon-btn" id="fwdBtn" title="Forward 5 seconds (L)">+5s</button>
-        <select class="speed" id="speed" title="Playback speed" aria-label="Playback speed">
-          <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
-          <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option>
-        </select>
-        <button class="icon-btn" id="loopBtn" title="Loop this clip">Loop</button>
-        <button class="icon-btn" id="autoBtn" title="Play the next item automatically">Auto-next</button>
+  <!-- ── Items + player ─────────────────────────────────────────── -->
+  <section class="viewer hidden" id="app">
+    <aside class="side">
+      <div class="side-head">
+        <input type="search" class="search" id="search" placeholder="Search text or file name…  ( / )" aria-label="Search items" />
+        <div class="filters" id="filters"></div>
+        <div class="count"><span id="countLbl"></span><span id="doneLbl"></span></div>
+        <div class="progress-bar"><i id="doneBar"></i></div>
       </div>
-      <div class="kbd"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> previous/next · <kbd>J</kbd><kbd>L</kbd> ±5s · <kbd>M</kbd> mark reviewed · <kbd>E</kbd> edit · <kbd>/</kbd> search</div>
-    </div>
-  </main>
-</section>
+      <div class="list" id="list"></div>
+    </aside>
 
-<input type="file" id="fileInput" multiple accept=".csv,.tsv,.txt,audio/*" class="hidden">
-<audio id="audio" preload="auto"></audio>
-<div class="overlay"><div>Drop to load</div></div>
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <main class="vmain">
+      <div class="card text-card">
+        <div class="text-head">
+          <div class="title" id="title"></div>
+          <div class="chips" id="chips"></div>
+          <div class="head-actions">
+          <button type="button" class="vbtn" id="fontDown" title="Smaller text" aria-label="Smaller text">A−</button>
+          <button type="button" class="vbtn" id="fontUp" title="Larger text" aria-label="Larger text">A+</button>
+          <span class="edit-off" style="display:contents">
+            <button type="button" class="vbtn" id="copyBtn" title="Copy text">Copy</button>
+            <button type="button" class="vbtn" id="editBtn" title="Edit text (E)">✎ Edit</button>
+            <button type="button" class="vbtn" id="doneBtn" title="Mark reviewed (M)">✓ Reviewed</button>
+          </span>
+          <span class="edit-on hidden" style="display:contents">
+            <button type="button" class="vbtn" id="revertBtn" title="Restore the original text">Revert to original</button>
+            <button type="button" class="vbtn" id="cancelBtn" title="Discard changes (Esc)">Cancel</button>
+            <button type="button" class="vbtn primary" id="saveBtn" title="Save (Ctrl+Enter)">Save</button>
+          </span>
+          </div>
+        </div>
+        <div class="text" id="text"></div>
+        <textarea class="editor hidden" id="editor" spellcheck="false" aria-label="Edit the text"></textarea>
+      </div>
 
-<script src="/viewer-core.js"></script>
-<script src="/review.js"></script>
+      <div class="card player">
+        <div class="wave-wrap" id="wave"><canvas id="canvas"></canvas><div class="wave-msg" id="waveMsg"></div></div>
+        <div class="controls">
+          <button type="button" class="vbtn" id="prevBtn" title="Previous (←)" aria-label="Previous item">⏮</button>
+          <button type="button" class="play" id="playBtn" title="Play / pause (Space)" aria-label="Play or pause"><svg id="playIco" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg></button>
+          <button type="button" class="vbtn" id="nextBtn" title="Next (→)" aria-label="Next item">⏭</button>
+          <span class="time" id="time">0:00 / 0:00</span>
+          <span class="spacer"></span>
+          <button type="button" class="vbtn" id="backBtn" title="Back 5 seconds (J)">−5s</button>
+          <button type="button" class="vbtn" id="fwdBtn" title="Forward 5 seconds (L)">+5s</button>
+          <select class="speed" id="speed" title="Playback speed" aria-label="Playback speed">
+            <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
+            <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+          </select>
+          <button type="button" class="vbtn" id="loopBtn" title="Loop this clip">Loop</button>
+          <button type="button" class="vbtn" id="autoBtn" title="Play the next item automatically">Auto-next</button>
+        </div>
+        <div class="kbd"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> previous/next · <kbd>J</kbd><kbd>L</kbd> ±5s · <kbd>M</kbd> mark reviewed · <kbd>E</kbd> edit · <kbd>/</kbd> search</div>
+      </div>
+    </main>
+  </section>
+
+  <input type="file" id="fileInput" multiple accept=".csv,.tsv,.txt,audio/*" class="hidden" />
+  <audio id="audio" preload="auto"></audio>
+  <div class="overlay"><div>Drop to load</div></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="viewer-core.js"></script>
+  <script src="review.js"></script>
 </body>
 </html>

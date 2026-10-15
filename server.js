@@ -1165,8 +1165,9 @@ async function sendToDrive(item) {
         includeItemsFromAllDrives: true,
       });
       for (const f of existing.data.files || []) {
+        // Exact name match only. A "starts with" test would also hit C10..C19 and C1's options track.
         const fn = f.name.toLowerCase();
-        if (prefixes.some((p) => fn.startsWith(p.toLowerCase()))) {
+        if (prefixes.some((p) => EXTS.some((ext) => fn === `${p.toLowerCase()}${ext}`))) {
           await drive.files.delete({ fileId: f.id, supportsAllDrives: true });
         }
       }

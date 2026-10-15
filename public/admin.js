@@ -230,6 +230,40 @@ async function checkAuthStatus() {
   }
 }
 
+// Warns when recordings are waiting in the database because Drive rejected them
+async function loadPendingBanner(retry) {
+  const main = document.querySelector('main.admin-main');
+  if (!main) return;
+  let banner = document.getElementById('pending-banner');
+  try {
+    const { res, data } = await safeFetchJson(
+      retry ? '/api/admin/pending-uploads/retry' : '/api/admin/pending-uploads',
+      { method: retry ? 'POST' : 'GET', headers: getAdminHeaders() }
+    );
+    if (!res.ok || !data || !data.count) {
+      if (banner) banner.remove();
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'pending-banner';
+      banner.style.cssText = 'margin:0 0 16px;padding:12px 16px;border-radius:8px;background:#fff3cd;color:#664d03;border:1px solid #ffda6a;';
+      main.prepend(banner);
+    }
+    const mb = (data.bytes / 1048576).toFixed(1);
+    banner.textContent = '';
+    const msg = document.createElement('span');
+    msg.textContent = `⚠️ ${data.count} recording(s) (${mb} MB) are safe in the database but not in Google Drive yet.` +
+      (data.lastError ? ` Last error: ${data.lastError}` : '') + ' ';
+    const btn = document.createElement('button');
+    btn.textContent = 'Retry now';
+    btn.onclick = () => loadPendingBanner(true);
+    banner.append(msg, btn);
+  } catch (err) {
+    console.warn('Could not load pending uploads:', err);
+  }
+}
+
 // ── Data Loading ───────────────────────────────────────────────────────────
 async function loadAdminData() {
   btnRefresh.disabled = true;
@@ -252,6 +286,8 @@ async function loadAdminData() {
     renderKPIs(overviewData);
     renderUsersTable(overviewData.users || []);
     populateUserFilter(overviewData.userList || []);
+
+    loadPendingBanner();
 
     // 2. Load recordings list
     const { res: recordingsRes, data: recData } = await safeFetchJson('/api/admin/recordings?practice=true', {

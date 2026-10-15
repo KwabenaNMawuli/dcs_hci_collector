@@ -17,6 +17,7 @@ const { Readable } = require('stream');
 const { google } = require('googleapis');
 const { parseQuestions } = require('./questions-parser');
 const userManager = require('./users-manager');
+const pendingUploads = require('./pending-uploads');
 
 const PORT = process.env.PORT || 3000;
 
@@ -537,6 +538,7 @@ app.get('/oauth2callback', async (req, res) => {
 
     // Restore and sync contributor accounts with Google Drive
     restoreUsersFromDrive().catch((e) => console.warn('Drive restore users error:', e.message));
+    processPendingUploads();
 
     res.redirect('/?auth=success');
   } catch (err) {
@@ -1123,6 +1125,105 @@ app.post('/api/practice/complete', (req, res) => {
   }
 });
 
+// Uploads one recording to the contributor's Drive folder. Throws if Drive is unreachable.
+async function sendToDrive(item) {
+  const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
+  if (!cleanFolderId) {
+    throw new Error('DRIVE_FOLDER_ID is not configured');
+  }
+
+  const drive = getDriveClient();
+  let folderId = await getUserDriveFolder(drive, cleanFolderId, item.username);
+  if (item.practice) {
+    folderId = await getUserPracticeDriveFolder(drive, folderId);
+  }
+
+  if (item.retry) {
+    // The earlier attempt may have reached Drive before the pending row was cleared
+    const dup = await drive.files.list({
+      q: `'${folderId}' in parents and name = '${item.filename}' and trashed = false`,
+      fields: 'files(id, name, webViewLink)',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    if (dup.data.files && dup.data.files.length > 0) {
+      return dup.data.files[0];
+    }
+  }
+
+  // If replace=true, delete old file matching this question/track in this user's folder
+  if (item.replace && !item.practice) {
+    try {
+      const prefixes = getAudioPrefixes(item.questionId, item.targetType, item.lang);
+      const existing = await drive.files.list({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'files(id, name)',
+        pageSize: 100,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      for (const f of existing.data.files || []) {
+        const fn = f.name.toLowerCase();
+        if (prefixes.some((p) => fn.startsWith(p.toLowerCase()))) {
+          await drive.files.delete({ fileId: f.id, supportsAllDrives: true });
+        }
+      }
+    } catch (delErr) {
+      console.warn('Could not delete old file in user folder:', delErr.message);
+    }
+  }
+
+  const bufferStream = new Readable();
+  bufferStream.push(item.buffer);
+  bufferStream.push(null);
+
+  const driveRes = await drive.files.create({
+    requestBody: {
+      name: item.filename,
+      parents: [folderId],
+      mimeType: item.mime,
+    },
+    media: {
+      mimeType: item.mime,
+      body: bufferStream,
+    },
+    fields: 'id, name, webViewLink',
+    supportsAllDrives: true,
+  });
+  return driveRes.data;
+}
+
+// Retries recordings held in Postgres. Safe to call repeatedly.
+let pendingRunning = false;
+async function processPendingUploads() {
+  if (pendingRunning || !pendingUploads.isEnabled()) return;
+  pendingRunning = true;
+  try {
+    const items = await pendingUploads.listAll();
+    if (items.length === 0) return;
+    console.log(`⏳ Retrying ${items.length} recording(s) held in Postgres...`);
+    let done = 0;
+    for (const item of items) {
+      try {
+        await sendToDrive({ ...item, pendingId: item.id, retry: true });
+        await pendingUploads.remove(item.id);
+        done++;
+      } catch (err) {
+        await pendingUploads.markFailed(item.id, err.message);
+        console.warn(`Retry failed for ${item.filename}: ${err.message}`);
+        // Auth/quota failures affect every file; stop and try again on the next tick
+        if (/invalid_grant|not connected|unauthorized|quota/i.test(err.message)) break;
+      }
+    }
+    console.log(`✅ Drive retry finished: ${done}/${items.length} delivered.`);
+  } catch (err) {
+    console.warn('Pending upload retry error:', err.message);
+  } finally {
+    pendingRunning = false;
+  }
+}
+
 // Main upload route — saves in per-user folder as MP3
 app.post('/api/upload', upload.single('audio'), async (req, res) => {
   try {
@@ -1166,71 +1267,44 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
     const localPath = path.join(userDir, filename);
     fs.writeFileSync(localPath, req.file.buffer);
 
-    // 2. Upload to Google Drive inside user's designated folder
-    const drive = getDriveClient();
-    const cleanFolderId = (DRIVE_FOLDER_ID || '').trim();
-
-    if (!cleanFolderId) {
-      return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
-    }
-
-    const userFolderId = await getUserDriveFolder(drive, cleanFolderId, normUser);
-
-    // If replace=true, delete old file matching this question/track in this user's folder
-    if (replace === 'true') {
-      try {
-        const prefixes = getAudioPrefixes(questionId, targetType, normLang);
-        const existingInUserFolder = await drive.files.list({
-          q: `'${userFolderId}' in parents and trashed = false`,
-          fields: 'files(id, name)',
-          pageSize: 100,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-        });
-
-        if (existingInUserFolder.data.files) {
-          for (const f of existingInUserFolder.data.files) {
-            const fn = f.name.toLowerCase();
-            if (prefixes.some(p => fn.startsWith(p.toLowerCase()))) {
-              await drive.files.delete({ fileId: f.id, supportsAllDrives: true });
-            }
-          }
-        }
-      } catch (delErr) {
-        console.warn('Could not delete old file in user folder:', delErr.message);
-      }
-    }
-
-    const bufferStream = new Readable();
-    bufferStream.push(req.file.buffer);
-    bufferStream.push(null);
-
+    // 2. Hold the audio in Postgres until Drive confirms it (local disk is wiped on Heroku restarts)
     const uploadMime = (req.file.mimetype && req.file.mimetype.startsWith('audio/'))
       ? req.file.mimetype
       : (ext === '.wav' ? 'audio/wav' : 'audio/mpeg');
 
-    const driveRes = await drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [userFolderId],
-        mimeType: uploadMime,
-      },
-      media: {
-        mimeType: uploadMime,
-        body: bufferStream,
-      },
-      fields: 'id, name, webViewLink',
-      supportsAllDrives: true,
-    });
+    const item = {
+      username: normUser,
+      filename,
+      practice: false,
+      replace: replace === 'true',
+      questionId,
+      targetType,
+      lang: normLang,
+      mime: uploadMime,
+      buffer: req.file.buffer,
+    };
+    item.pendingId = await pendingUploads.enqueue(item);
+
+    // 3. Upload to Google Drive inside user's designated folder
+    let driveFile;
+    try {
+      driveFile = await sendToDrive(item);
+      await pendingUploads.remove(item.pendingId);
+    } catch (driveErr) {
+      if (!item.pendingId) throw driveErr;
+      console.error(`Drive upload failed, ${filename} kept in Postgres for retry:`, driveErr.message);
+      await pendingUploads.markFailed(item.pendingId, driveErr.message);
+      return res.json({ success: true, queued: true, filename, user: normUser, lang: normLang, targetType: targetType || 'question' });
+    }
 
     res.json({
       success: true,
-      fileId: driveRes.data.id,
-      filename: driveRes.data.name,
+      fileId: driveFile.id,
+      filename: driveFile.name,
       user: normUser,
       lang: normLang,
       targetType: targetType || 'question',
-      webViewLink: driveRes.data.webViewLink,
+      webViewLink: driveFile.webViewLink,
     });
   } catch (err) {
     console.error('POST /api/upload error:', err);
@@ -1267,39 +1341,33 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
     fs.mkdirSync(userPracticeDir, { recursive: true });
     fs.writeFileSync(path.join(userPracticeDir, filename), req.file.buffer);
 
-    // 2. Upload to Drive inside user's practice folder
-    const parentId = (DRIVE_FOLDER_ID || '').trim();
-    if (!parentId) {
-      return res.status(500).json({ error: 'DRIVE_FOLDER_ID is not configured in .env' });
-    }
-
-    const drive = getDriveClient();
-    const userFolderId = await getUserDriveFolder(drive, parentId, normUser);
-    const practiceFolderId = await getUserPracticeDriveFolder(drive, userFolderId);
-
-    const bufferStream = new Readable();
-    bufferStream.push(req.file.buffer);
-    bufferStream.push(null);
-
+    // 2. Hold the audio in Postgres until Drive confirms it
     const uploadMime = (req.file.mimetype && req.file.mimetype.startsWith('audio/'))
       ? req.file.mimetype
       : (ext === '.wav' ? 'audio/wav' : 'audio/mpeg');
 
-    const driveRes = await drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [practiceFolderId],
-        mimeType: uploadMime,
-      },
-      media: {
-        mimeType: uploadMime,
-        body: bufferStream,
-      },
-      fields: 'id, name',
-      supportsAllDrives: true,
-    });
+    const item = {
+      username: normUser,
+      filename,
+      practice: true,
+      questionId,
+      lang: normLang,
+      mime: uploadMime,
+      buffer: req.file.buffer,
+    };
+    item.pendingId = await pendingUploads.enqueue(item);
 
-    res.json({ success: true, filename: driveRes.data.name, user: normUser });
+    // 3. Upload to Drive inside user's practice folder
+    try {
+      const driveFile = await sendToDrive(item);
+      await pendingUploads.remove(item.pendingId);
+      return res.json({ success: true, filename: driveFile.name, user: normUser });
+    } catch (driveErr) {
+      if (!item.pendingId) throw driveErr;
+      console.error(`Drive upload failed, ${filename} kept in Postgres for retry:`, driveErr.message);
+      await pendingUploads.markFailed(item.pendingId, driveErr.message);
+      return res.json({ success: true, queued: true, filename, user: normUser });
+    }
   } catch (err) {
     console.error('POST /api/practice-upload error:', err);
     res.status(500).json({ error: err.message });
@@ -1415,6 +1483,24 @@ app.get('/api/audio/:user/:filename', async (req, res) => {
   } catch (err) {
     console.error('Audio stream error:', err.message);
     res.status(500).send(`Audio playback error: ${err.message}`);
+  }
+});
+
+// Recordings waiting in Postgres because Drive was unavailable (Protected)
+app.get('/api/admin/pending-uploads', requireAdminAuth, async (_req, res) => {
+  try {
+    res.json(await pendingUploads.summary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/pending-uploads/retry', requireAdminAuth, async (_req, res) => {
+  try {
+    await processPendingUploads();
+    res.json(await pendingUploads.summary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1856,6 +1942,15 @@ app.listen(PORT, async () => {
     await restoreUsersFromDrive();
   } catch (err) {
     console.warn(`⚠️  Drive user restore warning: ${err.message}`);
+  }
+
+  // 4. Deliver any recordings that were held in Postgres while Drive was unavailable
+  try {
+    await pendingUploads.init();
+    processPendingUploads();
+    setInterval(processPendingUploads, 2 * 60 * 1000);
+  } catch (err) {
+    console.warn(`⚠️  Pending uploads init warning: ${err.message}`);
   }
 
   try {

@@ -1718,6 +1718,64 @@ app.get('/api/admin/audits', requireAdminAuth, async (_req, res) => {
   }
 });
 
+// Questionnaire items with no recording yet, for every contributor who has started (Protected).
+// Covers each language the contributor has recorded in; contributors with no recordings are left out.
+app.get('/api/admin/missing', requireAdminAuth, async (_req, res) => {
+  try {
+    const { recordings } = await listAllRecordings();
+    const pending = await pendingUploads.listNames();
+
+    const byUser = new Map();
+    const entry = (user) => {
+      const k = user.toLowerCase();
+      if (!byUser.has(k)) byUser.set(k, { user, files: new Map(), pending: new Set(), langs: new Set() });
+      return byUser.get(k);
+    };
+
+    for (const r of recordings) {
+      if (r.isPractice || r.user === 'default_user') continue;
+      const e = entry(r.user);
+      e.files.set(r.name.trim().toLowerCase(), r);
+      e.langs.add(r.lang);
+    }
+    for (const p of pending) {
+      if (p.practice) continue;
+      const e = entry(p.username);
+      e.pending.add(p.filename.toLowerCase());
+      e.langs.add(parseAudioFilename(p.filename, p.username).lang);
+    }
+
+    const items = [];
+    for (const e of byUser.values()) {
+      for (const lang of [...e.langs].sort()) {
+        let questions;
+        try { questions = await getQuestions(lang); } catch (_) { continue; }
+        for (const q of questions) {
+          const tracks = [['question', q.text || '']];
+          if (Array.isArray(q.options) && q.options.length > 0) tracks.push(['options', q.options.join('\n')]);
+          for (const [track, text] of tracks) {
+            const prefixes = getAudioPrefixes(q.id, track, lang);
+            if (findDriveFile(e.files, prefixes)) continue;
+            items.push({
+              user: e.user,
+              lang,
+              questionId: q.id,
+              track,
+              status: matchesPendingName(e.pending, prefixes) ? 'pending' : 'missing',
+              name: `${q.id}_${track}_${lang}.wav`,
+              text,
+            });
+          }
+        }
+      }
+    }
+    res.json({ total: items.length, items });
+  } catch (err) {
+    console.error('GET /api/admin/missing error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Recordings waiting in Postgres because Drive was unavailable (Protected)
 app.get('/api/admin/pending-uploads', requireAdminAuth, async (_req, res) => {
   try {

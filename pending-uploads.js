@@ -83,6 +83,18 @@ async function listAll() {
   return rows;
 }
 
+// Filenames still waiting for Drive, for one contributor (no audio bytes)
+async function listForUser(username) {
+  const p = pool();
+  if (!p) return [];
+  await init();
+  const { rows } = await p.query(
+    `SELECT id, filename, practice FROM pending_uploads WHERE LOWER(username) = LOWER($1) ORDER BY id`,
+    [username]
+  );
+  return rows;
+}
+
 async function summary() {
   const p = pool();
   if (!p) return { enabled: false, count: 0, bytes: 0, oldest: null, lastError: null };
@@ -98,4 +110,4 @@ async function summary() {
   return { enabled: true, count: r.count, bytes: Number(r.bytes), oldest: r.oldest, lastError: r.lastError };
 }
 
-module.exports = { isEnabled, init, enqueue, remove, markFailed, listAll, summary };
+module.exports = { isEnabled, init, enqueue, remove, markFailed, listAll, listForUser, summary };

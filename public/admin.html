@@ -254,6 +254,13 @@
           <label style="font-size:0.82rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Passcode / 4-Digit PIN *</label>
           <input type="text" id="create-user-pin" placeholder="e.g. 1234" required minlength="4" maxlength="12" value="1234" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;" />
         </div>
+        <div>
+          <label for="create-user-language" style="font-size:0.82rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Assigned Language *</label>
+          <select id="create-user-language" required style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;">
+            <option value="akan">Akan</option>
+            <option value="ewe">Ewe</option>
+          </select>
+        </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
           <input type="checkbox" id="create-user-auto-approve" checked style="width:16px;height:16px;cursor:pointer;" />
           <label for="create-user-auto-approve" style="font-size:0.88rem;color:#1e293b;cursor:pointer;">
@@ -272,4 +279,3 @@
   <script src="admin.js"></script>
 </body>
 </html>
-

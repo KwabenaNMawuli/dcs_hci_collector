@@ -1061,7 +1061,7 @@ app.get('/api/practice/status', async (req, res) => {
         const files = fs.readdirSync(userPracticeDir);
         for (const f of files) {
           const meta = parseAudioFilename(f, authUser);
-          if (meta.isPractice && meta.questionId) {
+          if (meta.isPractice && meta.questionId && (!user.language || meta.lang === user.language)) {
             savedQuestionIds.add(meta.questionId);
           }
         }
@@ -1085,7 +1085,7 @@ app.get('/api/practice/status', async (req, res) => {
         if (driveFiles.data.files) {
           for (const df of driveFiles.data.files) {
             const meta = parseAudioFilename(df.name, authUser);
-            if (meta.isPractice && meta.questionId) {
+            if (meta.isPractice && meta.questionId && (!user.language || meta.lang === user.language)) {
               savedQuestionIds.add(meta.questionId);
             }
           }
@@ -1245,6 +1245,11 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       });
     }
 
+    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    if (userRecord.language && normLang !== userRecord.language) {
+      return res.status(403).json({ error: `This contributor is assigned to ${userRecord.language === 'ewe' ? 'Ewe' : 'Akan'} only.` });
+    }
+
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
     }
@@ -1252,7 +1257,6 @@ app.post('/api/upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const typeSuffix = targetType === 'options' ? '_options' : '_question';
 
     // Use uploaded file extension (prioritizing .wav)
@@ -1324,6 +1328,14 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
     if (!normUser || normUser === 'default_user') {
       return res.status(401).json({ error: 'Please sign in with your contributor account before uploading.' });
     }
+    const userRecord = userManager.getUser(normUser);
+    if (!userRecord) {
+      return res.status(404).json({ error: 'Contributor account not found.' });
+    }
+    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
+    if (userRecord.language && normLang !== userRecord.language) {
+      return res.status(403).json({ error: `This contributor is assigned to ${userRecord.language === 'ewe' ? 'Ewe' : 'Akan'} only.` });
+    }
 
     if (!questionId || !/^[A-Za-z0-9]+$/.test(questionId)) {
       return res.status(400).json({ error: 'A valid questionId is required' });
@@ -1332,7 +1344,6 @@ app.post('/api/practice-upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const normLang = (lang || 'akan').toLowerCase() === 'ewe' ? 'ewe' : 'akan';
     const originalExt = path.extname(req.file.originalname || '').toLowerCase();
     const ext = originalExt && EXTS.includes(originalExt) ? originalExt : '.wav';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -1827,6 +1838,7 @@ app.get('/api/admin/overview', requireAdminAuth, async (req, res) => {
         practiceCompleted: regUser ? Boolean(regUser.practiceCompleted) : true,
         practiceApproved: regUser ? Boolean(regUser.practiceApproved) : true,
         practiceApprovedAt: regUser ? regUser.practiceApprovedAt : null,
+        language: regUser ? regUser.language : null,
         auditSignedOffAt: (auditMap[u.toLowerCase()] || {}).signedOffAt || null,
         lastActive: uRecs.length > 0 ? uRecs[uRecs.length - 1].createdTime : (regUser ? regUser.lastActive : null),
       };
@@ -2151,18 +2163,42 @@ app.post('/api/admin/reset-user-pin', requireAdminAuth, (req, res) => {
   }
 });
 
+app.post('/api/admin/assign-language', requireAdminAuth, (req, res) => {
+  try {
+    const { username, language } = req.body;
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required.' });
+    }
+    if (language !== 'akan' && language !== 'ewe') {
+      return res.status(400).json({ error: 'Assigned language must be Akan or Ewe.' });
+    }
+    const success = userManager.setUserLanguage(username, language);
+    if (!success) {
+      return res.status(404).json({ error: `User "${username}" not found in registry.` });
+    }
+    persistUsersToDrive().catch((e) => console.warn('Drive persist language assignment error:', e.message));
+    res.json({ success: true, user: userManager.getUser(username) });
+  } catch (err) {
+    console.error('POST /api/admin/assign-language error:', err);
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Admin Create Contributor Account (Protected)
 app.post('/api/admin/create-user', requireAdminAuth, (req, res) => {
   try {
-    const { username, displayName, pin, autoApprove } = req.body;
+    const { username, displayName, pin, language, autoApprove } = req.body;
     if (!username) {
       return res.status(400).json({ error: 'Username is required' });
     }
     if (!pin || String(pin).trim().length < 4) {
       return res.status(400).json({ error: 'PIN must be at least 4 digits or characters' });
     }
+    if (language !== 'akan' && language !== 'ewe') {
+      return res.status(400).json({ error: 'Assigned language must be Akan or Ewe.' });
+    }
 
-    const user = userManager.registerUser(username, displayName || username, pin);
+    const user = userManager.registerUser(username, displayName || username, pin, language);
 
     if (autoApprove) {
       userManager.setPracticeApproval(user.username, true, 'admin');
@@ -2261,4 +2297,3 @@ app.listen(PORT, async () => {
     console.warn(`⚠️  Could not parse Ewe questionnaire: ${err.message}`);
   }
 });
-

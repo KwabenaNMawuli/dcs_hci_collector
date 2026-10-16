@@ -53,6 +53,7 @@ const formCreateUser = document.getElementById('form-create-user');
 const inputCreateUsername = document.getElementById('create-user-username');
 const inputCreateDisplayName = document.getElementById('create-user-display-name');
 const inputCreatePin = document.getElementById('create-user-pin');
+const selectCreateLanguage = document.getElementById('create-user-language');
 const checkCreateAutoApprove = document.getElementById('create-user-auto-approve');
 const createUserError = document.getElementById('create-user-error');
 const btnConfirmCreateUser = document.getElementById('btn-confirm-create-user');
@@ -360,6 +361,15 @@ function renderUsersTable(users) {
     tr.innerHTML = `
       <td>
         <span class="user-badge">👤 ${escapeHtml(u.user)}</span>
+        <span class="lang-badge ${u.language === 'ewe' ? 'ewe' : 'akan'}" style="margin-left:6px;">${u.language ? (u.language === 'ewe' ? 'Ewe' : 'Akan') : 'Both'}</span>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:6px;">
+          <select class="user-language-select" data-user="${escapeHtml(u.user)}" aria-label="Assigned language for ${escapeHtml(u.user)}" style="padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;">
+            ${u.language ? '' : '<option value="" selected disabled>Assign…</option>'}
+            <option value="akan" ${u.language === 'akan' ? 'selected' : ''}>Akan</option>
+            <option value="ewe" ${u.language === 'ewe' ? 'selected' : ''}>Ewe</option>
+          </select>
+          <button type="button" class="btn-icon-link btn-assign-language" data-user="${escapeHtml(u.user)}" title="Save language assignment">Save</button>
+        </div>
         ${u.auditSignedOffAt ? `<span class="lang-badge" style="background:#dcfce7; color:#15803d; border-color:#86efac; margin-left:6px;" title="Signed off their recording audit on ${escapeHtml(new Date(u.auditSignedOffAt).toLocaleDateString())}">✓ Audit signed off</span>` : ''}
       </td>
       <td>
@@ -391,6 +401,34 @@ function renderUsersTable(users) {
     `;
     usersTableBody.appendChild(tr);
   }
+
+  usersTableBody.querySelectorAll('.btn-assign-language').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const username = btn.dataset.user;
+      const select = btn.closest('tr').querySelector('.user-language-select');
+      if (!select) return;
+      if (!['akan', 'ewe'].includes(select.value)) {
+        alert('Select Akan or Ewe before saving the assignment.');
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        const { res, data } = await safeFetchJson('/api/admin/assign-language', {
+          method: 'POST',
+          headers: getAdminHeaders(),
+          body: JSON.stringify({ username, language: select.value }),
+        });
+        if (!res.ok) throw new Error((data && data.error) || 'Failed to assign language');
+        await loadAdminData();
+        alert(`✅ ${username} is now assigned to ${select.value === 'ewe' ? 'Ewe' : 'Akan'}.`);
+      } catch (err) {
+        alert(`Could not assign language: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    });
+  });
 
   usersTableBody.querySelectorAll('.btn-approve-user').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -740,6 +778,7 @@ async function handleCreateUserSubmit(e) {
   const username = (inputCreateUsername ? inputCreateUsername.value : '').trim();
   const displayName = (inputCreateDisplayName ? inputCreateDisplayName.value : '').trim();
   const pin = (inputCreatePin ? inputCreatePin.value : '').trim();
+  const language = selectCreateLanguage ? selectCreateLanguage.value : '';
   const autoApprove = checkCreateAutoApprove ? checkCreateAutoApprove.checked : true;
 
   if (!username) {
@@ -756,6 +795,13 @@ async function handleCreateUserSubmit(e) {
     }
     return;
   }
+  if (!['akan', 'ewe'].includes(language)) {
+    if (createUserError) {
+      createUserError.hidden = false;
+      createUserError.textContent = 'Please select an assigned language.';
+    }
+    return;
+  }
 
   btnConfirmCreateUser.disabled = true;
   btnConfirmCreateUser.textContent = '⏳ Creating…';
@@ -764,7 +810,7 @@ async function handleCreateUserSubmit(e) {
     const { res, data } = await safeFetchJson('/api/admin/create-user', {
       method: 'POST',
       headers: getAdminHeaders(),
-      body: JSON.stringify({ username, displayName, pin, autoApprove }),
+      body: JSON.stringify({ username, displayName, pin, language, autoApprove }),
     });
 
     if (!res.ok) {
@@ -774,7 +820,8 @@ async function handleCreateUserSubmit(e) {
     closeCreateUserModal();
     await loadAdminData();
     const statusText = data.user && data.user.practiceApproved ? 'Greenlit (Ready to record immediately)' : 'In Practice';
-    alert(`✅ Contributor "${data.user.displayName || data.user.username}" created successfully!\nPIN: ${pin}\nStatus: ${statusText}`);
+    const languageLabel = language === 'ewe' ? 'Ewe' : 'Akan';
+    alert(`✅ Contributor "${data.user.displayName || data.user.username}" created successfully!\nLanguage: ${languageLabel}\nPIN: ${pin}\nStatus: ${statusText}`);
   } catch (err) {
     if (createUserError) {
       createUserError.hidden = false;

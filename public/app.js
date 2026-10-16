@@ -8,6 +8,7 @@
 
 // ── State ──────────────────────────────────────────────────────────────────
 let currentLang    = localStorage.getItem('dcs_audio_lang') || 'akan';
+let assignedLanguage = null;
 let currentUser    = localStorage.getItem('dcs_audio_user') || 'default_user';
 let allQuestions   = [];
 let currentQ       = null;
@@ -102,6 +103,17 @@ async function initUser() {
       window.location.replace('/practice.html');
       return false;
     }
+    assignedLanguage = data.user.language || null;
+    if (assignedLanguage) {
+      currentLang = assignedLanguage;
+      localStorage.setItem('dcs_audio_lang', currentLang);
+      [btnLangAkan, btnModalLangAkan].forEach((button) => {
+        if (button) button.style.display = assignedLanguage === 'akan' ? '' : 'none';
+      });
+      [btnLangEwe, btnModalLangEwe].forEach((button) => {
+        if (button) button.style.display = assignedLanguage === 'ewe' ? '' : 'none';
+      });
+    }
     currentUser = data.user.username;
     localStorage.setItem('dcs_audio_user', currentUser);
     if (nameEl) nameEl.textContent = data.user.displayName || currentUser;
@@ -166,6 +178,7 @@ function setLanguageUI(lang) {
 }
 
 async function switchLanguage(lang) {
+  if (assignedLanguage && lang !== assignedLanguage) return;
   if (lang === currentLang) return;
 
   if (mediaRecorder && mediaRecorder.state === 'recording') {

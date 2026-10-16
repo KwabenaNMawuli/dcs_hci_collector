@@ -83,8 +83,11 @@ async function initDatabase() {
         practice_completed BOOLEAN NOT NULL DEFAULT FALSE,
         practice_approved BOOLEAN NOT NULL DEFAULT FALSE,
         practice_approved_at TIMESTAMPTZ,
-        practice_approved_by VARCHAR(100)
+        practice_approved_by VARCHAR(100),
+        assigned_language VARCHAR(10)
       );
+
+      ALTER TABLE contributors ADD COLUMN IF NOT EXISTS assigned_language VARCHAR(10);
 
       CREATE TABLE IF NOT EXISTS app_settings (
         key VARCHAR(100) PRIMARY KEY,
@@ -106,7 +109,8 @@ async function initDatabase() {
         practice_completed as "practiceCompleted",
         practice_approved as "practiceApproved",
         practice_approved_at as "practiceApprovedAt",
-        practice_approved_by as "practiceApprovedBy"
+        practice_approved_by as "practiceApprovedBy",
+        assigned_language as "language"
       FROM contributors
       ORDER BY created_at ASC
     `);
@@ -123,6 +127,7 @@ async function initDatabase() {
         practiceApproved: Boolean(r.practiceApproved),
         practiceApprovedAt: r.practiceApprovedAt ? new Date(r.practiceApprovedAt).toISOString() : null,
         practiceApprovedBy: r.practiceApprovedBy || null,
+        language: r.language || null,
       }));
       saveUsers(usersCache);
       console.log(`🐘 Loaded ${usersCache.length} contributor account(s) permanently from PostgreSQL.`);
@@ -151,8 +156,8 @@ async function saveUserToDb(u) {
     await pool.query(`
       INSERT INTO contributors (
         username, display_name, salt, pin_hash, created_at, last_active,
-        practice_completed, practice_approved, practice_approved_at, practice_approved_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        practice_completed, practice_approved, practice_approved_at, practice_approved_by, assigned_language
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (username) DO UPDATE SET
         display_name = EXCLUDED.display_name,
         salt = EXCLUDED.salt,
@@ -161,7 +166,8 @@ async function saveUserToDb(u) {
         practice_completed = EXCLUDED.practice_completed,
         practice_approved = EXCLUDED.practice_approved,
         practice_approved_at = EXCLUDED.practice_approved_at,
-        practice_approved_by = EXCLUDED.practice_approved_by
+        practice_approved_by = EXCLUDED.practice_approved_by,
+        assigned_language = EXCLUDED.assigned_language
     `, [
       u.username,
       u.displayName || u.username,
@@ -173,6 +179,7 @@ async function saveUserToDb(u) {
       Boolean(u.practiceApproved),
       u.practiceApprovedAt || null,
       u.practiceApprovedBy || null,
+      u.language || null,
     ]);
   } catch (err) {
     console.error(`Error saving user ${u.username} to PostgreSQL:`, err.message);
@@ -270,13 +277,16 @@ function saveUsers(users) {
 // ---------------------------------------------------------------------------
 // Contributor Authentication & Registration APIs
 // ---------------------------------------------------------------------------
-function registerUser(rawUsername, displayName, pin) {
+function registerUser(rawUsername, displayName, pin, language = null) {
   const username = sanitizeUsername(rawUsername);
   if (!username || username.length < 2) {
     throw new Error('Username must be at least 2 alphanumeric characters.');
   }
   if (!pin || String(pin).trim().length < 4) {
     throw new Error('PIN / Passcode must be at least 4 digits or characters.');
+  }
+  if (language !== null && language !== 'akan' && language !== 'ewe') {
+    throw new Error('Assigned language must be Akan or Ewe.');
   }
 
   const users = loadUsers();
@@ -300,6 +310,7 @@ function registerUser(rawUsername, displayName, pin) {
     practiceApproved: false,
     practiceApprovedAt: null,
     practiceApprovedBy: null,
+    language,
   };
 
   users.push(newUser);
@@ -312,6 +323,7 @@ function registerUser(rawUsername, displayName, pin) {
     createdAt: newUser.createdAt,
     practiceCompleted: false,
     practiceApproved: false,
+    language: newUser.language,
   };
 }
 
@@ -345,6 +357,7 @@ function verifyUser(rawUsername, pin) {
     lastActive: user.lastActive,
     practiceCompleted: Boolean(user.practiceCompleted),
     practiceApproved: Boolean(user.practiceApproved),
+    language: user.language || null,
   };
 }
 
@@ -358,6 +371,7 @@ function listUsers() {
     practiceCompleted: Boolean(u.practiceCompleted),
     practiceApproved: Boolean(u.practiceApproved),
     practiceApprovedAt: u.practiceApprovedAt || null,
+    language: u.language || null,
   }));
 }
 
@@ -375,6 +389,7 @@ function getUser(rawUsername) {
     practiceCompleted: Boolean(user.practiceCompleted),
     practiceApproved: Boolean(user.practiceApproved),
     practiceApprovedAt: user.practiceApprovedAt || null,
+    language: user.language || null,
   };
 }
 
@@ -447,7 +462,7 @@ function mergeUsers(cloudUsers) {
         const cloudTime = new Date(u.lastActive || u.createdAt || 0).getTime();
         const localTime = new Date(existing.lastActive || existing.createdAt || 0).getTime();
         if (cloudTime > localTime) {
-          const mergedItem = { ...existing, ...u };
+          const mergedItem = { ...existing, ...u, language: u.language || existing.language || null };
           map.set(key, mergedItem);
           saveUserToDb(mergedItem).catch(() => {});
         }
@@ -467,6 +482,22 @@ function setPracticeCompleted(rawUsername) {
   const user = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
   if (!user) return false;
   user.practiceCompleted = true;
+  user.lastActive = new Date().toISOString();
+  saveUsers(users);
+  saveUserToDb(user).catch(() => {});
+  return true;
+}
+
+function setUserLanguage(rawUsername, language) {
+  const username = sanitizeUsername(rawUsername);
+  if (!username) return false;
+  if (language !== 'akan' && language !== 'ewe') {
+    throw new Error('Assigned language must be Akan or Ewe.');
+  }
+  const users = loadUsers();
+  const user = users.find((u) => u.username.toLowerCase() === username.toLowerCase());
+  if (!user) return false;
+  user.language = language;
   user.lastActive = new Date().toISOString();
   saveUsers(users);
   saveUserToDb(user).catch(() => {});
@@ -505,6 +536,7 @@ module.exports = {
   getRawUsers,
   mergeUsers,
   setPracticeCompleted,
+  setUserLanguage,
   setPracticeApproval,
   initDatabase,
   getDbSetting,

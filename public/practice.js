@@ -8,6 +8,7 @@
 'use strict';
 
 let lang        = localStorage.getItem('dcs_audio_lang') || 'akan';
+let assignedLanguage = null;
 let questions   = [];
 let index       = 0;
 let currentUser = localStorage.getItem('dcs_audio_user') || 'default_user';
@@ -149,6 +150,7 @@ function show() {
 
 // ── Language ───────────────────────────────────────────────────────────────
 function setLang(next) {
+  if (assignedLanguage && next !== assignedLanguage) return;
   if (next === lang) return;
   stopRecording();
   lang = next;
@@ -504,6 +506,14 @@ async function initPractice() {
     userProfile = data.user;
     currentUser = data.user.username;
     localStorage.setItem('dcs_audio_user', currentUser);
+    assignedLanguage = data.user.language || null;
+    if (assignedLanguage) {
+      lang = assignedLanguage;
+      localStorage.setItem('dcs_audio_lang', lang);
+    }
+    langBtns.forEach((button) => {
+      button.style.display = !assignedLanguage || button.dataset.lang === assignedLanguage ? '' : 'none';
+    });
 
     if (userNameEl) {
       userNameEl.textContent = data.user.displayName || currentUser;

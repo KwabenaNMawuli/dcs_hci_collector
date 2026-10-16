@@ -1638,9 +1638,10 @@ app.get('/api/my-audit', requireContributor, async (req, res) => {
       });
     }
 
-    const langs = recordedLangs(sources.driveFiles, sources.pendingNames);
+    const assigned = (userManager.getUser(user) || {}).language || null;
+    const langs = assigned ? [assigned] : recordedLangs(sources.driveFiles, sources.pendingNames);
     const wanted = (req.query.lang || '').toLowerCase();
-    const lang = wanted === 'ewe' || wanted === 'akan' ? wanted : langs[0];
+    const lang = assigned || (wanted === 'ewe' || wanted === 'akan' ? wanted : langs[0]);
     if (!langs.includes(lang)) langs.push(lang);
 
     const items = await buildAuditItems(user, lang, sources.driveFiles, sources.pendingNames);
@@ -1687,7 +1688,9 @@ app.post('/api/my-audit/signoff', requireContributor, async (req, res) => {
     }
 
     const summary = { total: 0, recorded: 0, pending: 0, missing: 0, byLang: {} };
-    for (const lang of recordedLangs(sources.driveFiles, sources.pendingNames)) {
+    const assignedLang = (userManager.getUser(user) || {}).language || null;
+    const signoffLangs = assignedLang ? [assignedLang] : recordedLangs(sources.driveFiles, sources.pendingNames);
+    for (const lang of signoffLangs) {
       const items = await buildAuditItems(user, lang, sources.driveFiles, sources.pendingNames);
       const s = summarizeAudit(items);
       summary.byLang[lang] = s;

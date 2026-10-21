@@ -123,6 +123,8 @@
         const src = status(it) === 'ok' ? audioFor(it) : null;
         const tags = (src && src.local ? '<span class="tag local">LOCAL</span>' : '')
           + (isEdited(it) ? '<span class="tag edited">EDITED</span>' : '')
+          + (it.approval === 'approved' ? '<span class="tag approved">APPROVED</span>' : '')
+          + (it.approval === 'flagged' ? '<span class="tag flagged">NOT APPROVED</span>' : '')
           + (status(it) === 'missing' ? '<span class="tag missing">MISSING</span>' : '')
           + (status(it) === 'pending' ? '<span class="tag pending">UPLOADING</span>' : '');
         const snip = textOf(it).replace(/\s+/g, ' ').slice(0, 90);
@@ -185,6 +187,8 @@
       if (status(it) === 'missing') chips.push('<span class="chip missing">No recording</span>');
       if (status(it) === 'pending') chips.push('<span class="chip pending">Waiting for Drive</span>');
       if (isEdited(it)) chips.push('<span class="chip edited">Edited</span>');
+      if (it.approval === 'approved') chips.push('<span class="chip approved">Approved by admin</span>');
+      if (it.approval === 'flagged') chips.push('<span class="chip flagged">Not approved by admin yet</span>');
       $('chips').innerHTML = chips.join('');
 
       const notice = status(it) === 'missing'

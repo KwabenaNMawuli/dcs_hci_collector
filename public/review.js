@@ -27,10 +27,29 @@
     doneLabel: 'Reviewed',
     waveformRemote: true,
     resolveAudio,
-    onDone: () => AV.store.set('done:' + source, [...done]),
+    onDone: saveMark,
     onEdit: () => AV.store.set('edits:' + source, edits),
     onSelect: (it) => AV.store.set('last:' + source, it.key),
   });
+
+  // Server mode saves each mark to the database so contributors can see it; CSV mode stays in this browser
+  async function saveMark(key, isDone) {
+    if (sourceKind !== 'server') return AV.store.set('done:' + source, [...done]);
+    const it = items.find((i) => i.key === key);
+    if (!it || !it.meta.serverKey) return;
+    try {
+      const res = await fetch('/api/admin/reviews', {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: it.user, key: it.meta.serverKey, reviewed: isDone }),
+      });
+      if (!res.ok) throw new Error('save failed');
+    } catch (_) {
+      isDone ? done.delete(key) : done.add(key);
+      viewer.refresh();
+      AV.toast('Couldn’t save that review mark. Check your connection and try again.');
+    }
+  }
 
   /* ---------- admin gate ---------- */
   const adminToken = () => sessionStorage.getItem('dcs_admin_token') || localStorage.getItem('dcs_admin_token') || '';
@@ -257,12 +276,15 @@
   async function loadFromServer() {
     AV.toast('Loading recordings from the server…');
     try {
-      const [recRes, akanRes, eweRes, missRes] = await Promise.all([
+      const [recRes, akanRes, eweRes, missRes, revRes] = await Promise.all([
         fetch('/api/admin/recordings', { headers: adminHeaders() }),
         fetch('/api/questions?lang=akan'),
         fetch('/api/questions?lang=ewe'),
         fetch('/api/admin/missing', { headers: adminHeaders() }),
+        fetch('/api/admin/reviews', { headers: adminHeaders() }),
       ]);
+      if (!revRes.ok) throw new Error('Could not load saved review marks');
+      const saved = (await revRes.json()).reviews || {};
       if (recRes.status === 401) return toLogin();
       if (!recRes.ok) throw new Error('Could not load recordings');
       const { recordings } = await recRes.json();
@@ -305,13 +327,18 @@
               track: { label: 'tracks', value: track },
             },
             audio: r.status === 'ok' && r.streamUrl ? { url: r.streamUrl } : null,
-            meta: { name: r.name, user: r.user, rawBase: r.name },
+            meta: { name: r.name, user: r.user, rawBase: r.name, serverKey: `${r.questionId}:${r.targetType}:${r.lang}` },
           };
         });
 
       csv = null;
       sourceKind = 'server';
       useSource('server');
+      // Review marks come from the database, not the browser cache
+      done.clear();
+      list.forEach((it) => {
+        if (it.status !== 'missing' && (saved[it.user.toLowerCase()] || []).includes(it.meta.serverKey)) done.add(it.key);
+      });
       const nMissing = list.filter((i) => i.status === 'missing').length;
       const nPending = list.filter((i) => i.status === 'pending').length;
       $('fileChip').textContent = `Server · ${list.length - nMissing - nPending} recordings`

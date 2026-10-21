@@ -1655,6 +1655,7 @@ app.get('/api/my-audit', requireContributor, async (req, res) => {
       items,
       summary: summarizeAudit(items),
       reviewed: (audit.reviewed || []).filter((k) => known.has(k)),
+      adminReviewed: (audit.adminReviewed || []).filter((k) => known.has(k)),
       signedOffAt: audit.signedOffAt || null,
     });
   } catch (err) {
@@ -1720,6 +1721,30 @@ app.post('/api/my-audit/reopen', requireContributor, async (req, res) => {
     await audits.reopen(req.contributor);
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin review marks, saved on the server and shown to contributors (Protected)
+app.get('/api/admin/reviews', requireAdminAuth, async (_req, res) => {
+  try {
+    res.json({ reviews: await audits.listAdminReviewed() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/reviews', requireAdminAuth, async (req, res) => {
+  try {
+    const { user, key, reviewed } = req.body || {};
+    if (typeof user !== 'string' || !user.trim()) return res.status(400).json({ error: 'Invalid user' });
+    if (typeof key !== 'string' || !/^[A-Za-z0-9]+:(question|options):(akan|ewe)$/.test(key)) {
+      return res.status(400).json({ error: 'Invalid item key' });
+    }
+    await audits.setAdminReviewed(user, key, Boolean(reviewed));
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/admin/reviews error:', err);
     res.status(500).json({ error: err.message });
   }
 });

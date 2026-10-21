@@ -83,6 +83,7 @@
   }
 
   function toItems(list) {
+    const approved = new Set(data.adminReviewed || []);
     return list.map((it) => {
       const trackLabel = it.track === 'options' ? 'Answer options' : 'Question';
       return {
@@ -91,6 +92,7 @@
         num: it.questionId,
         text: it.text,
         status: it.status,
+        approval: it.status === 'missing' ? null : approved.has(it.key) ? 'approved' : 'flagged',
         chips: [
           { label: 'Track', value: trackLabel },
           { label: 'Language', value: it.lang === 'ewe' ? 'Ewe' : 'Akan' },

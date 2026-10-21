@@ -175,6 +175,8 @@ body.dragging .overlay { opacity: 1; }
 .tag.edited, .chip.edited { background: #e8f0fe; color: var(--clr-primary); }
 .tag.missing, .chip.missing { background: var(--clr-missing-bg); color: var(--clr-danger); }
 .tag.pending, .chip.pending { background: #fef7e0; color: #b06000; }
+.tag.approved, .chip.approved { background: #e6f4ea; color: #137333; }
+.tag.flagged, .chip.flagged { background: #fce8e6; color: #c5221f; }
 
 /* ── Main column ───────────────────────────────────────────────── */
 .vmain { display: flex; flex-direction: column; gap: 16px; min-height: 0; min-width: 0; }

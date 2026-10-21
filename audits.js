@@ -26,6 +26,7 @@ async function init() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await p.query(`ALTER TABLE contributor_audits ADD COLUMN IF NOT EXISTS admin_reviewed JSONB NOT NULL DEFAULT '[]'`);
   tableReady = true;
 }
 
@@ -44,7 +45,7 @@ function writeFile(all) {
 const key = (username) => String(username || '').toLowerCase();
 
 async function get(username) {
-  const empty = { reviewed: [], signedOffAt: null, summary: null };
+  const empty = { reviewed: [], adminReviewed: [], signedOffAt: null, summary: null };
   const p = pool();
   if (!p) {
     const rec = readFile()[key(username)];
@@ -52,7 +53,7 @@ async function get(username) {
   }
   await init();
   const { rows } = await p.query(
-    `SELECT reviewed, signed_off_at AS "signedOffAt", summary FROM contributor_audits WHERE username = $1`,
+    `SELECT reviewed, admin_reviewed AS "adminReviewed", signed_off_at AS "signedOffAt", summary FROM contributor_audits WHERE username = $1`,
     [key(username)]
   );
   return rows[0] || empty;
@@ -70,13 +71,13 @@ async function save(username, patch) {
   }
   await init();
   await p.query(
-    `INSERT INTO contributor_audits (username, reviewed, signed_off_at, summary, updated_at)
-     VALUES ($1, $2::jsonb, $3, $4::jsonb, NOW())
+    `INSERT INTO contributor_audits (username, reviewed, admin_reviewed, signed_off_at, summary, updated_at)
+     VALUES ($1, $2::jsonb, $5::jsonb, $3, $4::jsonb, NOW())
      ON CONFLICT (username) DO UPDATE
-       SET reviewed = EXCLUDED.reviewed, signed_off_at = EXCLUDED.signed_off_at,
-           summary = EXCLUDED.summary, updated_at = NOW()`,
+       SET reviewed = EXCLUDED.reviewed, admin_reviewed = EXCLUDED.admin_reviewed,
+           signed_off_at = EXCLUDED.signed_off_at, summary = EXCLUDED.summary, updated_at = NOW()`,
     [key(username), JSON.stringify(next.reviewed || []), next.signedOffAt || null,
-      next.summary ? JSON.stringify(next.summary) : null]
+      next.summary ? JSON.stringify(next.summary) : null, JSON.stringify(next.adminReviewed || [])]
   );
   return next;
 }
@@ -86,6 +87,28 @@ async function setReviewed(username, itemKey, isReviewed) {
   const set = new Set(cur.reviewed || []);
   if (isReviewed) set.add(itemKey); else set.delete(itemKey);
   return save(username, { reviewed: [...set] });
+}
+
+// Admin approval of a specific recording; shown to the contributor on their audit page
+async function setAdminReviewed(username, itemKey, isReviewed) {
+  const cur = await get(username);
+  const set = new Set(cur.adminReviewed || []);
+  if (isReviewed) set.add(itemKey); else set.delete(itemKey);
+  return save(username, { adminReviewed: [...set] });
+}
+
+async function listAdminReviewed() {
+  const out = {};
+  const p = pool();
+  if (!p) {
+    const all = readFile();
+    Object.keys(all).forEach((u) => { out[u] = all[u].adminReviewed || []; });
+    return out;
+  }
+  await init();
+  const { rows } = await p.query(`SELECT username, admin_reviewed FROM contributor_audits`);
+  rows.forEach((r) => { out[r.username] = r.admin_reviewed || []; });
+  return out;
 }
 
 async function signOff(username, summary) {
@@ -109,4 +132,4 @@ async function listAll() {
   return out;
 }
 
-module.exports = { init, get, setReviewed, signOff, reopen, listAll };
+module.exports = { init, get, setReviewed, setAdminReviewed, listAdminReviewed, signOff, reopen, listAll };

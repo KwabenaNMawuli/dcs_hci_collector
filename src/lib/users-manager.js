@@ -12,7 +12,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 if (!fs.existsSync(DATA_DIR)) {

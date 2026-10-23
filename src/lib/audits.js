@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const userManager = require('./users-manager');
 
-const FILE = path.join(__dirname, 'audits.json');
+const FILE = path.join(__dirname, '..', '..', 'audits.json');
 let tableReady = false;
 
 function pool() {

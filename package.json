@@ -2,11 +2,11 @@
   "name": "dcs_hci_collector",
   "version": "1.0.0",
   "description": "A simple tool for collecting audio data for questionnaires etc.",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "dev": "node --watch --watch-preserve-output server.js"
+    "start": "node src/server.js",
+    "dev": "node --watch --watch-preserve-output src/server.js"
   },
   "repository": {
     "type": "git",

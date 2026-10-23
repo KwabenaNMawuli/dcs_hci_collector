@@ -6,19 +6,23 @@
 
 'use strict';
 
-require('dotenv').config();
+const path = require('path');
+
+// Repo root (src/ lives one level below it). Data, uploads, tokens and .env stay at the root.
+const ROOT_DIR = path.join(__dirname, '..');
+
+require('dotenv').config({ path: path.join(ROOT_DIR, '.env') });
 
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { Readable } = require('stream');
 const { google } = require('googleapis');
-const { parseQuestions } = require('./questions-parser');
-const userManager = require('./users-manager');
-const pendingUploads = require('./pending-uploads');
-const audits = require('./audits');
+const { parseQuestions } = require('./lib/questions-parser');
+const userManager = require('./lib/users-manager');
+const pendingUploads = require('./lib/pending-uploads');
+const audits = require('./lib/audits');
 
 const PORT = process.env.PORT || 3000;
 
@@ -26,13 +30,13 @@ const PORT = process.env.PORT || 3000;
 const DOCX_PATH_AKAN =
   process.env.DOCX_PATH_AKAN ||
   process.env.DOCX_PATH ||
-  path.join(__dirname, 'data', 'questionnaire.docx');
+  path.join(ROOT_DIR, 'data', 'questionnaire.docx');
 
 const DOCX_PATH_EWE =
   process.env.DOCX_PATH_EWE ||
-  (fs.existsSync(path.join(__dirname, 'data', 'questionnaire-ewe.docx'))
-    ? path.join(__dirname, 'data', 'questionnaire-ewe.docx')
-    : path.join(__dirname, 'GH-MoMo-questionnaire-Ewe-draft (1).docx'));
+  (fs.existsSync(path.join(ROOT_DIR, 'data', 'questionnaire-ewe.docx'))
+    ? path.join(ROOT_DIR, 'data', 'questionnaire-ewe.docx')
+    : path.join(ROOT_DIR, 'GH-MoMo-questionnaire-Ewe-draft (1).docx'));
 
 const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
 
@@ -41,8 +45,8 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `http://localhost:${PORT}/oauth2callback`;
 
-const TOKEN_PATH = path.join(__dirname, 'tokens.json');
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const TOKEN_PATH = path.join(ROOT_DIR, 'tokens.json');
+const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
 
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -74,21 +78,21 @@ function cookieParserMiddleware(req, res, next) {
 const app = express();
 app.use(express.json());
 app.use(cookieParserMiddleware);
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(ROOT_DIR, 'public')));
 
 // Serve admin dashboard at /admin and /admin.html
 app.get(['/admin', '/admin.html'], (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  res.sendFile(path.join(ROOT_DIR, 'public', 'admin.html'));
 });
 
 // Serve admin login page at /login and /login.html
 app.get(['/login', '/login.html'], (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  res.sendFile(path.join(ROOT_DIR, 'public', 'login.html'));
 });
 
 // Serve contributor sign-in page at /user-login and /user-login.html
 app.get(['/user-login', '/user-login.html'], (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'user-login.html'));
+  res.sendFile(path.join(ROOT_DIR, 'public', 'user-login.html'));
 });
 
 // ---------------------------------------------------------------------------
@@ -207,7 +211,7 @@ let cachedOAuth2Client = null;
 
 function persistRefreshTokenToEnv(refreshToken) {
   try {
-    const envPath = path.join(__dirname, '.env');
+    const envPath = path.join(ROOT_DIR, '.env');
     if (!fs.existsSync(envPath)) return;
 
     let envContent = fs.readFileSync(envPath, 'utf8');
@@ -1396,7 +1400,7 @@ function getExpectedAdminPassword() {
   let pw = null;
   // Read fresh from .env so password edits work immediately without requiring server restart
   try {
-    const envPath = path.join(__dirname, '.env');
+    const envPath = path.join(ROOT_DIR, '.env');
     if (fs.existsSync(envPath)) {
       const content = fs.readFileSync(envPath, 'utf8');
       const m = content.match(/^\s*ADMIN_PASSWORD\s*=\s*(.*)$/m);

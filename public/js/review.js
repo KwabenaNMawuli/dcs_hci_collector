@@ -14,6 +14,7 @@
 
   const done = new Set();
   const edits = {};
+  const serverEdits = new Map(); // item key -> corrected text the server has
   let source = '';           // 'server' or the CSV file name; scopes saved review marks and edits
   let sourceKind = '';       // 'server' | 'csv'
   let csv = null;            // { headers, rows, map, groupCols }
@@ -28,7 +29,7 @@
     waveformRemote: true,
     resolveAudio,
     onDone: saveMark,
-    onEdit: () => AV.store.set('edits:' + source, edits),
+    onEdit: saveEdit,
     onSelect: (it) => AV.store.set('last:' + source, it.key),
   });
 
@@ -48,6 +49,27 @@
       isDone ? done.delete(key) : done.add(key);
       viewer.refresh();
       AV.toast('Couldn’t save that review mark. Check your connection and try again.');
+    }
+  }
+
+  // Server mode saves corrections to the database (shared with contributors); CSV mode stays in this browser
+  async function saveEdit(key, text) {
+    if (sourceKind !== 'server') return AV.store.set('edits:' + source, edits);
+    const it = items.find((i) => i.key === key);
+    if (!it || !it.meta.serverKey) return;
+    const previous = serverEdits.has(key) ? serverEdits.get(key) : null;
+    try {
+      const res = await fetch('/api/admin/edits', {
+        method: 'POST',
+        headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: it.user, key: it.meta.serverKey, text }),
+      });
+      if (!res.ok) throw new Error('save failed');
+      serverEdits.set(key, text);
+    } catch (_) {
+      if (previous == null) delete edits[key]; else edits[key] = previous;
+      viewer.refresh();
+      AV.toast('Couldn’t save that correction. Check your connection and try again.');
     }
   }
 
@@ -276,15 +298,18 @@
   async function loadFromServer() {
     AV.toast('Loading recordings from the server…');
     try {
-      const [recRes, akanRes, eweRes, missRes, revRes] = await Promise.all([
+      const [recRes, akanRes, eweRes, missRes, revRes, editRes] = await Promise.all([
         fetch('/api/admin/recordings', { headers: adminHeaders() }),
         fetch('/api/questions?lang=akan'),
         fetch('/api/questions?lang=ewe'),
         fetch('/api/admin/missing', { headers: adminHeaders() }),
         fetch('/api/admin/reviews', { headers: adminHeaders() }),
+        fetch('/api/admin/edits', { headers: adminHeaders() }),
       ]);
       if (!revRes.ok) throw new Error('Could not load saved review marks');
+      if (!editRes.ok) throw new Error('Could not load saved corrections');
       const saved = (await revRes.json()).reviews || {};
+      const savedEdits = (await editRes.json()).edits || {};
       if (recRes.status === 401) return toLogin();
       if (!recRes.ok) throw new Error('Could not load recordings');
       const { recordings } = await recRes.json();
@@ -338,6 +363,13 @@
       done.clear();
       list.forEach((it) => {
         if (it.status !== 'missing' && (saved[it.user.toLowerCase()] || []).includes(it.meta.serverKey)) done.add(it.key);
+      });
+      // Corrections come from the database too (contributors' and admins'), not the browser cache
+      Object.keys(edits).forEach((k) => delete edits[k]);
+      serverEdits.clear();
+      list.forEach((it) => {
+        const text = (savedEdits[it.user.toLowerCase()] || {})[it.meta.serverKey];
+        if (typeof text === 'string') { edits[it.key] = text; serverEdits.set(it.key, text); }
       });
       const nMissing = list.filter((i) => i.status === 'missing').length;
       const nPending = list.filter((i) => i.status === 'pending').length;

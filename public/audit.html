@@ -103,11 +103,20 @@
           <a class="vbtn hidden" id="recordLink" href="/">🎙️ Go record this</a>
           <button type="button" class="vbtn" id="fontDown" title="Smaller text" aria-label="Smaller text">A−</button>
           <button type="button" class="vbtn" id="fontUp" title="Larger text" aria-label="Larger text">A+</button>
-          <button type="button" class="vbtn" id="copyBtn" title="Copy text">Copy</button>
-          <button type="button" class="vbtn" id="doneBtn" title="Mark as checked (M)">✓ Checked</button>
+          <span class="edit-off" style="display:contents">
+            <button type="button" class="vbtn" id="copyBtn" title="Copy text">Copy</button>
+            <button type="button" class="vbtn" id="editBtn" title="Correct the text (E)">✎ Edit</button>
+            <button type="button" class="vbtn" id="doneBtn" title="Mark as checked (M)">✓ Checked</button>
+          </span>
+          <span class="edit-on hidden" style="display:contents">
+            <button type="button" class="vbtn" id="revertBtn" title="Restore the original text">Revert to original</button>
+            <button type="button" class="vbtn" id="cancelBtn" title="Discard changes (Esc)">Cancel</button>
+            <button type="button" class="vbtn primary" id="saveBtn" title="Save (Ctrl+Enter)">Save</button>
+          </span>
           </div>
         </div>
         <div class="text" id="text"></div>
+        <textarea class="editor hidden" id="editor" spellcheck="false" aria-label="Correct the text"></textarea>
       </div>
 
       <div class="card player">
@@ -126,7 +135,7 @@
           <button type="button" class="vbtn" id="loopBtn" title="Loop this clip">Loop</button>
           <button type="button" class="vbtn" id="autoBtn" title="Play the next item automatically">Auto-next</button>
         </div>
-        <div class="kbd"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> previous/next · <kbd>J</kbd><kbd>L</kbd> ±5s · <kbd>M</kbd> mark checked · <kbd>/</kbd> search</div>
+        <div class="kbd"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> previous/next · <kbd>J</kbd><kbd>L</kbd> ±5s · <kbd>M</kbd> mark checked · <kbd>E</kbd> edit text · <kbd>/</kbd> search</div>
       </div>
     </main>
   </section>

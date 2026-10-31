@@ -1660,6 +1660,7 @@ app.get('/api/my-audit', requireContributor, async (req, res) => {
       summary: summarizeAudit(items),
       reviewed: (audit.reviewed || []).filter((k) => known.has(k)),
       adminReviewed: (audit.adminReviewed || []).filter((k) => known.has(k)),
+      edits: Object.fromEntries(Object.entries(audit.edits || {}).filter(([k]) => known.has(k))),
       signedOffAt: audit.signedOffAt || null,
     });
   } catch (err) {
@@ -1678,6 +1679,30 @@ app.post('/api/my-audit/reviewed', requireContributor, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('POST /api/my-audit/reviewed error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Transcript corrections. `text: null` restores the original wording.
+const ITEM_KEY_RE = /^[A-Za-z0-9]+:(question|options):(akan|ewe)$/;
+const MAX_EDIT_LENGTH = 5000;
+
+function validEdit(key, text) {
+  if (typeof key !== 'string' || !ITEM_KEY_RE.test(key)) return 'Invalid item key';
+  if (text !== null && typeof text !== 'string') return 'Invalid text';
+  if (text && text.length > MAX_EDIT_LENGTH) return 'That text is too long';
+  return null;
+}
+
+app.post('/api/my-audit/edit', requireContributor, async (req, res) => {
+  try {
+    const { key, text } = req.body || {};
+    const problem = validEdit(key, text);
+    if (problem) return res.status(400).json({ error: problem });
+    await audits.setEdit(req.contributor, key, text);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/my-audit/edit error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1749,6 +1774,29 @@ app.post('/api/admin/reviews', requireAdminAuth, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('POST /api/admin/reviews error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Transcript corrections made by contributors (and admins), keyed by contributor (Protected)
+app.get('/api/admin/edits', requireAdminAuth, async (_req, res) => {
+  try {
+    res.json({ edits: await audits.listEdits() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/edits', requireAdminAuth, async (req, res) => {
+  try {
+    const { user, key, text } = req.body || {};
+    if (typeof user !== 'string' || !user.trim()) return res.status(400).json({ error: 'Invalid user' });
+    const problem = validEdit(key, text);
+    if (problem) return res.status(400).json({ error: problem });
+    await audits.setEdit(user, key, text);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /api/admin/edits error:', err);
     res.status(500).json({ error: err.message });
   }
 });

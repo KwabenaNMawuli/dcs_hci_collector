@@ -2,7 +2,7 @@
  * audit.js — contributor self-audit.
  * Shows every questionnaire item for the signed-in contributor, whether a recording
  * reached Google Drive, lets them listen back and tick items off, and sign off at the end.
- * Read-only: transcripts cannot be edited here.
+ * Contributors can correct a transcript; corrections are saved to the server and show up in the admin review page.
  */
 'use strict';
 
@@ -11,13 +11,17 @@
   const AV = window.AudioViewer;
 
   const done = new Set();
+  const edits = {};
   let data = null;
+  const lastSaved = new Map(); // key -> text the server has
 
   const viewer = AV.create({
     done,
+    edits,
     doneLabel: 'Checked',
-    editable: false,
+    editable: true,
     onDone: saveMark,
+    onEdit: saveEdit,
     onProgress: (p) => {
       $('stChecked').textContent = `${p.done} of ${p.reviewable} checked`;
       $('checkFill').style.width = (p.reviewable ? (p.done / p.reviewable) * 100 : 0) + '%';
@@ -116,6 +120,10 @@
       data = body;
       done.clear();
       body.reviewed.forEach((k) => done.add(k));
+      Object.keys(edits).forEach((k) => delete edits[k]);
+      Object.assign(edits, body.edits || {});
+      lastSaved.clear();
+      Object.entries(edits).forEach(([k, v]) => lastSaved.set(k, v));
       $('whoChip').textContent = '👤 ' + body.user;
       $('whoChip').classList.remove('hidden');
 
@@ -142,6 +150,21 @@
       isDone ? done.delete(key) : done.add(key);
       viewer.refresh();
       AV.toast('Couldn’t save that tick. Check your connection and try again.');
+    }
+  }
+
+  /* ---------- text corrections ---------- */
+  // Restores the saved state if the server rejects the change, so the screen never shows an unsaved edit as saved
+  async function saveEdit(key, text) {
+    const previous = lastSaved.has(key) ? lastSaved.get(key) : null;
+    try {
+      const { res } = await api('/api/my-audit/edit', { method: 'POST', body: JSON.stringify({ key, text }) });
+      if (!res.ok) throw new Error('save failed');
+      lastSaved.set(key, text);
+    } catch (_) {
+      if (previous == null) delete edits[key]; else edits[key] = previous;
+      viewer.refresh();
+      AV.toast('Couldn’t save your correction. Check your connection and try again.');
     }
   }
 

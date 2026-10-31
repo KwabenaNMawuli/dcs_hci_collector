@@ -27,6 +27,7 @@ async function init() {
     );
   `);
   await p.query(`ALTER TABLE contributor_audits ADD COLUMN IF NOT EXISTS admin_reviewed JSONB NOT NULL DEFAULT '[]'`);
+  await p.query(`ALTER TABLE contributor_audits ADD COLUMN IF NOT EXISTS edits JSONB NOT NULL DEFAULT '{}'`);
   tableReady = true;
 }
 
@@ -45,7 +46,7 @@ function writeFile(all) {
 const key = (username) => String(username || '').toLowerCase();
 
 async function get(username) {
-  const empty = { reviewed: [], adminReviewed: [], signedOffAt: null, summary: null };
+  const empty = { reviewed: [], adminReviewed: [], edits: {}, signedOffAt: null, summary: null };
   const p = pool();
   if (!p) {
     const rec = readFile()[key(username)];
@@ -53,7 +54,7 @@ async function get(username) {
   }
   await init();
   const { rows } = await p.query(
-    `SELECT reviewed, admin_reviewed AS "adminReviewed", signed_off_at AS "signedOffAt", summary FROM contributor_audits WHERE username = $1`,
+    `SELECT reviewed, admin_reviewed AS "adminReviewed", edits, signed_off_at AS "signedOffAt", summary FROM contributor_audits WHERE username = $1`,
     [key(username)]
   );
   return rows[0] || empty;
@@ -71,13 +72,13 @@ async function save(username, patch) {
   }
   await init();
   await p.query(
-    `INSERT INTO contributor_audits (username, reviewed, admin_reviewed, signed_off_at, summary, updated_at)
-     VALUES ($1, $2::jsonb, $5::jsonb, $3, $4::jsonb, NOW())
+    `INSERT INTO contributor_audits (username, reviewed, admin_reviewed, edits, signed_off_at, summary, updated_at)
+     VALUES ($1, $2::jsonb, $5::jsonb, $6::jsonb, $3, $4::jsonb, NOW())
      ON CONFLICT (username) DO UPDATE
-       SET reviewed = EXCLUDED.reviewed, admin_reviewed = EXCLUDED.admin_reviewed,
+       SET reviewed = EXCLUDED.reviewed, admin_reviewed = EXCLUDED.admin_reviewed, edits = EXCLUDED.edits,
            signed_off_at = EXCLUDED.signed_off_at, summary = EXCLUDED.summary, updated_at = NOW()`,
     [key(username), JSON.stringify(next.reviewed || []), next.signedOffAt || null,
-      next.summary ? JSON.stringify(next.summary) : null, JSON.stringify(next.adminReviewed || [])]
+      next.summary ? JSON.stringify(next.summary) : null, JSON.stringify(next.adminReviewed || []), JSON.stringify(next.edits || {})]
   );
   return next;
 }
@@ -95,6 +96,28 @@ async function setAdminReviewed(username, itemKey, isReviewed) {
   const set = new Set(cur.adminReviewed || []);
   if (isReviewed) set.add(itemKey); else set.delete(itemKey);
   return save(username, { adminReviewed: [...set] });
+}
+
+// Corrected transcript text for one item; null restores the original
+async function setEdit(username, itemKey, text) {
+  const cur = await get(username);
+  const edits = { ...(cur.edits || {}) };
+  if (text == null) delete edits[itemKey]; else edits[itemKey] = text;
+  return save(username, { edits });
+}
+
+async function listEdits() {
+  const out = {};
+  const p = pool();
+  if (!p) {
+    const all = readFile();
+    Object.keys(all).forEach((u) => { if (Object.keys(all[u].edits || {}).length) out[u] = all[u].edits; });
+    return out;
+  }
+  await init();
+  const { rows } = await p.query(`SELECT username, edits FROM contributor_audits WHERE edits <> '{}'::jsonb`);
+  rows.forEach((r) => { out[r.username] = r.edits; });
+  return out;
 }
 
 async function listAdminReviewed() {
@@ -132,4 +155,4 @@ async function listAll() {
   return out;
 }
 
-module.exports = { init, get, setReviewed, setAdminReviewed, listAdminReviewed, signOff, reopen, listAll };
+module.exports = { init, get, setReviewed, setAdminReviewed, listAdminReviewed, setEdit, listEdits, signOff, reopen, listAll };

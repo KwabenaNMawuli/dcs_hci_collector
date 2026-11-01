@@ -238,11 +238,18 @@ function saveTokens(newTokens) {
     } catch (_) {}
   }
 
-  // Ensure refresh_token is never wiped out when receiving refreshed access tokens
+  // Ensure refresh_token is never wiped out when receiving refreshed access tokens.
+  // tokens.json is lost on every Heroku restart, so the in-memory credentials must rank
+  // above the env var, or a stale env token would overwrite the good one in PostgreSQL.
+  const inMemory = cachedOAuth2Client && cachedOAuth2Client.credentials;
   const merged = {
     ...existing,
     ...newTokens,
-    refresh_token: newTokens.refresh_token || existing.refresh_token || process.env.GOOGLE_REFRESH_TOKEN,
+    refresh_token:
+      newTokens.refresh_token ||
+      (inMemory && inMemory.refresh_token) ||
+      existing.refresh_token ||
+      process.env.GOOGLE_REFRESH_TOKEN,
   };
 
   try {
@@ -2340,10 +2347,11 @@ app.listen(PORT, async () => {
     console.warn(`⚠️  PostgreSQL initialization warning: ${dbErr.message}`);
   }
 
-  // 2. Load Google OAuth credentials from database if available
+  // 2. Load Google OAuth credentials from database. The DB copy is the most recently
+  // authorised one, so it overrides a possibly stale GOOGLE_REFRESH_TOKEN config var.
   try {
     const oauth2Client = getOAuth2Client();
-    if (oauth2Client && (!oauth2Client.credentials || (!oauth2Client.credentials.refresh_token && !oauth2Client.credentials.access_token))) {
+    if (oauth2Client) {
       await loadTokensFromDb(oauth2Client);
     }
   } catch (_) {}

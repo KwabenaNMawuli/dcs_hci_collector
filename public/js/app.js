@@ -213,12 +213,49 @@ async function switchLanguage(lang) {
 }
 
 // ── Data loading ───────────────────────────────────────────────────────────
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let originalQuestions = [];
+let originalLang = currentLang;
+let myEdits = {};
+
+// Corrections saved from the audit page or by an admin. If this fails the original wording still shows.
+async function fetchMyEdits() {
+  try {
+    const res = await fetch('/api/my-audit/edits');
+    if (!res.ok) return {};
+    return (await res.json()).edits || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function applyMyEdits(questions, edits, lang) {
+  return questions.map((q) => {
+    const out = { ...q };
+    const text = edits[`${q.id}:question:${lang}`];
+    const options = edits[`${q.id}:options:${lang}`];
+    if (typeof text === 'string') out.text = text;
+    if (typeof options === 'string') {
+      const lines = options.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length > 0) out.options = lines;
+    }
+    return out;
+  });
+}
+
 async function loadQuestions(lang = currentLang) {
   try {
-    const res = await fetch(`/api/questions?lang=${encodeURIComponent(lang)}`);
+    const [res, edits] = await Promise.all([
+      fetch(`/api/questions?lang=${encodeURIComponent(lang)}`),
+      fetchMyEdits(),
+    ]);
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
-    allQuestions = data.questions || [];
+    originalQuestions = data.questions || [];
+    originalLang = lang;
+    myEdits = edits;
+    allQuestions = applyMyEdits(originalQuestions, myEdits, lang);
     applyFilters();
   } catch (err) {
     grid.innerHTML = `<div class="empty-state">
@@ -227,6 +264,16 @@ async function loadQuestions(lang = currentLang) {
     </div>`;
   }
 }
+
+// Pick up corrections made in another tab or by an admin. Skipped while a question is open so recording is never interrupted.
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || (modal && !modal.hidden) || originalQuestions.length === 0) return;
+  const edits = await fetchMyEdits();
+  if (JSON.stringify(edits) === JSON.stringify(myEdits) || (modal && !modal.hidden)) return;
+  myEdits = edits;
+  allQuestions = applyMyEdits(originalQuestions, myEdits, originalLang);
+  applyFilters();
+});
 
 // ── Grid rendering (No biased markers shown to users) ──────────────────────
 function renderGrid(questions) {
@@ -262,7 +309,7 @@ function buildCard(q) {
       </div>
       ${(recordedQSession || recordedOptsSession) ? '<span class="q-badge" style="background:#dcfce7;color:#166534;">✔ Recorded in session</span>' : ''}
     </div>
-    <p class="q-text">${q.text || '<em>No text available</em>'}</p>
+    <p class="q-text">${q.text ? escapeHtml(q.text) : '<em>No text available</em>'}</p>
     ${hasOpts ? `<div class="card-options-summary">📋 ${q.options.length} options available</div>` : ''}
 
     <div class="card-tracks">

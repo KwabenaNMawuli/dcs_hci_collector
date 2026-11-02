@@ -168,6 +168,26 @@
     }
   }
 
+  // Picks up an admin's corrections when the contributor returns to this tab. Only redraws on a real
+  // change, because redrawing restarts the audio, and never while they are mid-edit.
+  async function syncEdits() {
+    if (document.hidden || !data || viewer.state.editing) return;
+    try {
+      const { res, body } = await api('/api/my-audit/edits');
+      if (!res.ok || !body || viewer.state.editing) return;
+      const incoming = Object.fromEntries(Object.entries(body.edits || {}).filter(([k]) => k.endsWith(`:${data.lang}`)));
+      const incomingKeys = Object.keys(incoming);
+      const same = incomingKeys.length === lastSaved.size && incomingKeys.every((k) => lastSaved.get(k) === incoming[k]);
+      if (same) return;
+      Object.keys(edits).forEach((k) => delete edits[k]);
+      Object.assign(edits, incoming);
+      lastSaved.clear();
+      incomingKeys.forEach((k) => lastSaved.set(k, incoming[k]));
+      viewer.refresh();
+    } catch (_) { /* keep what is on screen; the next visit tries again */ }
+  }
+  document.addEventListener('visibilitychange', syncEdits);
+
   /* ---------- sign-off ---------- */
   async function signOff(acknowledgeMissing) {
     const { res, body } = await api('/api/my-audit/signoff', { method: 'POST', body: JSON.stringify({ acknowledgeMissing }) });

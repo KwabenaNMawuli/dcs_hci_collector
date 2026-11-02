@@ -1701,6 +1701,17 @@ function validEdit(key, text) {
   return null;
 }
 
+// The contributor's corrections on their own (no Drive scan), for the recording page and tab refreshes
+app.get('/api/my-audit/edits', requireContributor, async (req, res) => {
+  try {
+    const audit = await audits.get(req.contributor);
+    res.json({ edits: audit.edits || {} });
+  } catch (err) {
+    console.error('GET /api/my-audit/edits error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/my-audit/edit', requireContributor, async (req, res) => {
   try {
     const { key, text } = req.body || {};
